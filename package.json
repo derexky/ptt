@@ -1,0 +1,22 @@
+{
+  "name": "ptt-tools",
+  "version": "1.0.0",
+  "description": "Tools for ptt",
+  "scripts": {
+    "post": "node post.js",
+    "ai": "node ai.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.12.2",
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.3",
+    "iconv-lite": "^0.7.0",
+    "mysql2": "^3.15.2",
+    "node-pty": "^1.0.0",
+    "node-schedule": "^2.1.1",
+    "openai": "^6.6.0",
+    "ssh2": "^1.17.0",
+    "websocket": "^1.0.35"
+  }
+}
