@@ -1,0 +1,38 @@
+{
+  "name": "functions",
+  "description": "Cloud Functions for Firebase",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log",
+
+    "predeploy": "npm run copy:env &&npm run copy:external", 
+    "copy:env": "cp ../.env .",
+    "copy:external": "mkdir -p external && cp ../poster.js ../ai.js ../helper.js ./external"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "axios": "^1.12.2",
+    "cheerio": "^1.1.2",
+    "dotenv": "^17.2.3",
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^7.0.0",
+    "iconv-lite": "^0.7.0",
+    "mysql2": "^3.15.2",
+    "node-pty": "^1.0.0",
+    "node-schedule": "^2.1.1",
+    "openai": "^6.6.0",
+    "ssh2": "^1.17.0",
+    "websocket": "^1.0.35"
+  },
+  "devDependencies": {
+    "firebase-functions-test": "^3.1.0"
+  },
+  "private": true
+}
