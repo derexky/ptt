@@ -103,7 +103,7 @@ class Poster {
 
       this.currentState = status.respPost
       this.isProcessing = false
-      this.stream.write(keywordMap.input_resp)
+      await this.delayWrite(keywordMap.input_resp)
     }
   }
 
@@ -508,14 +508,14 @@ class Poster {
         break
 
       case status.respPost:
-        if (chunk.includes(keywordMap.reTitle)) {
+        // if (chunk.includes(keywordMap.reTitle)) {
           console.log(`\n[Auto] run response process...`)
           await this.delayWrite(keywordMap.input_Yes) // 採用原標題
  
           // if (chunk.includes(keywordMap.reContent)) {
           await this.delayWrite(keywordMap.input_No) // 不引用原文
           this.currentState = status.startPost // 確認發送完畢後才切換狀態
-        }
+        // }
         break
 
       case status.newPost:

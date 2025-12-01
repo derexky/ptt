@@ -55,52 +55,62 @@ async function runPost(config) {
   }
 }
 
-exports.post = onRequest(
-  {
-    timeoutSeconds: 120,
-  },
-  async (request, response) => {
-    // 1. 設置 CORS 標頭 (可選，如果您從前端網頁調用)
-    // response.set('Access-Control-Allow-Origin', '*');
+const config =  {
+  timeoutSeconds: 120,
+}
 
-    // 2. 獲取 HTTP 請求 Body 中的 JSON 數據
-    const body = request.body
-    logger.info('Received request body:', body)
+const createStreamHandler = async (request, response) => {
+  // 1. 設置 CORS 標頭 (可選，如果您從前端網頁調用)
+  // response.set('Access-Control-Allow-Origin', '*');
 
-    // 3. 呼叫核心邏輯並處理結果
-    try {
-      const postConfig = {
-        id: body.id,
-        password: body.password,
-        args: body.args || {}, // 確保 args 至少是個空對象
-        isNewPost: body.isNewPost === true, // 確保為布林值
-        isSendByWord: body.isSendByWord === true, // 確保為布林值
-      }
+  // 2. 獲取 HTTP 請求 Body 中的 JSON 數據
+  const body = request.body
+  logger.info('Received request body:', body)
 
-      const result = await runPost(postConfig)
-      const { aiContent, reply, message, controller, finalPostPromise } = result
+  // 3. 呼叫核心邏輯並處理結果
+  try {
+    const postConfig = {
+      id: body.id,
+      password: body.password,
+      args: body.args || {}, // 確保 args 至少是個空對象
+      isNewPost: body.isNewPost === true, // 確保為布林值
+      isSendByWord: body.isSendByWord === true, // 確保為布林值
+    }
 
-      response.status(200).json({
-        success: true,
-        message,
-        aiContent,
-        reply,
-      })
+    const result = await runPost(postConfig)
+    const { aiContent, reply, message, controller, finalPostPromise } = result
 
-      if (controller) {
-        console.log(`\n[Auto] Resuming task in background.`)
-        await controller.continueState()
-        await finalPostPromise.finally(() => {
-          console.log(`\n[Auto] Background task finished and cleared from activeTasks.`)
-        })
-      }
-    } catch (error) {
-      // 失敗：返回 500 Internal Server Error
-      logger.error('Function execution error:', error.message)
-      response.status(500).json({
-        success: false,
-        error: error.message || 'An unknown error occurred during posting.',
+    response.status(200).json({
+      success: true,
+      message,
+      aiContent,
+      reply,
+    })
+
+    if (controller) {
+      console.log(`\n[Auto] Resuming task in background.`)
+      await controller.continueState()
+      await finalPostPromise.finally(() => {
+        console.log(
+          `\n[Auto] Background task finished and cleared from activeTasks.`
+        )
       })
     }
+  } catch (error) {
+    // 失敗：返回 500 Internal Server Error
+    logger.error('Function execution error:', error.message)
+    response.status(500).json({
+      success: false,
+      error: error.message || 'An unknown error occurred during posting.',
+    })
   }
-)
+}
+
+// 區域 A: us-central1 (default)
+exports.postUs = onRequest(config, createStreamHandler)
+
+// 區域 B: asia-east1
+exports.post = onRequest({ ...config,region: 'asia-east1' }, createStreamHandler)
+
+// 區域 C: europe-west1
+exports.postEu = onRequest({ ...config, region: 'europe-west1' }, createStreamHandler)

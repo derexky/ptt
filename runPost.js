@@ -1,5 +1,5 @@
 require('dotenv').config()
-const { Poster } = require('./posterWS')
+const { Poster } = require('./poster')
 
 const aliasMap = {
   b: 'board',
