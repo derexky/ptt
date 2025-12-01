@@ -67,14 +67,6 @@ async function generateContentByGoogle({ prompt, stance, target = "文中主角"
   return result.response.text()
 }
 
-// (async () => {
-//     try {
-//         const resultText = await generateContentByGoogle('https://www.ptt.cc/bbs/Gossiping/M.1761621779.A.761.html  提取連結裡文章內容 但不包含:開頭的部分');
-//         console.log("AI 生成內容:\n", resultText); // 確保結果被印出
-//     } catch (error) {
-//         console.error("AI 呼叫失敗:", error);
-//     }
-// })()
 
 module.exports = {
   generateContentByGoogle

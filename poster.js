@@ -13,11 +13,11 @@ const {
 const status = {
   init: 0,
   login: 1,
-  welcome: 2,
   mainMenu: 3,
   searchBoard: 4,
   atArticleTitle: 5,
   onBoard: 6,
+  pause: 7,
   writeQuit: 10,
   newPost: 11,
   startPost: 12,
@@ -79,9 +79,9 @@ class Poster {
     this.abortSignal = false
     this.aiContent = null
 
-    this.aiContentReady = new Promise((resolve, reject) => {
-      this._aiContentReadyResolve = resolve // 儲存 resolve 函式
-      this._aiContentReadyReject = reject
+    this.contentReady = new Promise((resolve, reject) => {
+      this._contentReadyResolve = resolve // 儲存 resolve 函式
+      this._contentReadyReject = reject
     })
     this.finalResolve = null // 最終 Promise 的 resolve
     this.finalReject = null
@@ -90,9 +90,8 @@ class Poster {
     this.board = null
     this.title = null
     this.articleNumber = null
-    this.contentPath = null
+    this.draft = null
     this.target = null
-    this.isNewPost = false
     this.stance = null
     this.isNeedBackup = false
   }
@@ -100,10 +99,11 @@ class Poster {
   continueState = async () => {
     if (this.stream) {
       console.log('\n[Auto] Resuming PTT process...')
-
-      this.currentState = status.respPost
+      const isNewPost = !Number(this.articleNumber)
+      this.currentState = isNewPost ? status.newPost : status.respPost
       this.isProcessing = false
-      await this.delayWrite(keywordMap.input_resp)
+      const input = isNewPost ? keywordMap.input_post : keywordMap.input_resp
+      await this.delayWrite(input)
     }
   }
 
@@ -147,7 +147,7 @@ class Poster {
     process.stdout.write(output)
 
     if (current === total) {
-      process.stdout.write('\n') // 完成後換行
+      process.stdout.write('\n')
     }
   }
 
@@ -169,13 +169,10 @@ class Poster {
           const end = Math.min(idx + batchSize, fullContent.length)
           const batch = fullContent.slice(idx, end)
 
-          // 更新進度（傳送多個字時仍顯示目前 idx）
           this.updatePostingProgress(end, fullContent.length, 'Char')
 
-          // 寫入資料串流
           this.stream.write(batch)
 
-          // 更新 idx
           idx = end
 
           setTimeout(() => resolve(false), rndDelay)
@@ -330,6 +327,46 @@ class Poster {
     return contentLines.join('\n').trim()
   }
 
+  handleResolve = ({ text, link }) => {
+     this.currentState = status.pause
+
+     if (!text || !text.length) {
+      this.conn.end()
+      this.finalResolve({
+        success: false,
+        message: 'Content is empty.',
+      })
+      return
+    }
+
+    if (this._contentReadyResolve) {
+      this._contentReadyResolve({
+        message: 'Content ready, proceeding to post.',
+        content: text,
+        url: link,
+      })
+      this._contentReadyResolve = null // 確保只呼叫一次
+      console.log(`\n[Auto] Content ready, pausing task for index.js callback.`)
+    }
+  }
+
+  getAiText = async (drift) => {
+    const prompt = drift +
+      '\r\n根據前述內容延伸並發表看法,\r\n回覆的文章不要包括上述內容的引文和推文,\r\n也不需要作者,看板,標題,時間的格式化部分'
+    const isUseAI = this.stance || this.target
+    let rawText = drift
+    if(isUseAI) {
+      const aiContent = await generateContentByGoogle({
+        prompt,
+        stance: this.stance,
+        target: this.target,
+      })
+      rawText = aiContent
+    }
+
+    return devideParagraph(rawText)
+  }
+
   /**
    * 核心狀態處理機
    */
@@ -337,7 +374,6 @@ class Poster {
     // console.log(`[State${this.currentState}]${this.isProcessing} ${chunk}`)
     if (this.isProcessing) return
 
-    // this.buffer += chunk
     this.isProcessing = true
 
     const previousState = this.currentState
@@ -371,60 +407,55 @@ class Poster {
       case status.init:
         if (chunk.includes(keywordMap.account)) {
           console.log('\n[Auto] Sending ID...')
-          await this.delayWrite(this.id + keywordMap.input_enter)
           this.currentState = status.login
+          this.stream.write(this.id + keywordMap.input_enter)
         }
         break
 
       case status.login:
         if (chunk.includes(keywordMap.password)) {
           console.log('\n[Auto] Sending password...')
-          await this.delayWrite(this.password + keywordMap.input_enter)
-          this.currentState = status.welcome
+          this.currentState = status.mainMenu
+          this.stream.write(this.password + keywordMap.input_enter) 
         }
-        break
-
-      case status.welcome:
-        this.currentState = status.mainMenu
         break
 
       case status.mainMenu:
         if (chunk.includes(keywordMap.mainMenu)) {
           console.log('\n[Auto] At main menu, entering board search...')
-          await this.delayWrite(keywordMap.input_search)
           this.currentState = status.searchBoard
+          this.stream.write(keywordMap.input_search)         
         }
         break
 
       case status.searchBoard:
         if (chunk.includes(keywordMap.searchBoard)) {
           console.log('\n[Auto] Searching board...')
-          await this.delayWrite(this.board + keywordMap.input_enter)
           this.currentState = status.onBoard
+          this.stream.write(this.board + keywordMap.input_enter)
         }
         break
 
       case status.onBoard:
         if (chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
           console.log('\n[Auto] On board, search/starting post...')
-          if (this.isNewPost) {
-            const content = readFile(this.contentPath)
-            this.postContent = devideParagraph(content)
-            await this.delayWrite(keywordMap.input_post)
-            this.currentState = status.newPost
+          const isNewPost = !Number(this.articleNumber) // 檢查是否為新文章 (不是回文)
+          if (isNewPost) {
+            this.postContent = await this.getAiText(this.draft)
+            this.handleResolve({ text: this.postContent })
           } else {
-            await this.delayWrite(
+            this.currentState = status.atArticleTitle
+            this.stream.write(
               `${this.articleNumber}${keywordMap.input_enter}`
             )
-            this.currentState = status.atArticleTitle
           }
         }
         break
 
       case status.atArticleTitle:
         console.log('\n[Auto] At title, entering article...')
-        await this.delayWrite(keywordMap.input_right) // 向右鍵
         this.currentState = status.readArticle
+        this.stream.write(keywordMap.input_right) // 向右鍵
         break
 
       case status.readArticle:
@@ -458,58 +489,27 @@ class Poster {
             }`
             const backupContent = readFile(backupPath)
 
-            let contentToPost = ''
             if (backupContent) {
-              contentToPost = devideParagraph(backupContent)
+              this.postContent = backupContent
             } else {
-              // AI 生成內容
-              const prompt =
-                article.content +
-                '\r\n根據上述內容發表看法,\r\n回覆的文章不要包括上述內容的引文和推文,\r\n也不需要作者,看板,標題,時間的格式化部分'
-              const content = await generateContentByGoogle({
-                prompt,
-                stance: this.stance,
-                target: this.target,
-              })
-              if (content) {
-                contentToPost = devideParagraph(content)
-                if (this.isNeedBackup) writeFile(contentToPost, backupPath)
-              }
+              this.postContent = await this.getAiText(article.content)
+
+              if (this.isNeedBackup) writeFile(contentToPost, backupPath)
             }
 
-            if (contentToPost === '') {
-              this.conn.end()
-              this.finalResolve({
-                success: false,
-                message: 'AI content is empty.',
-              })
-              return
-            }
+            this.handleResolve({ text: this.postContent, link })
 
-            this.postContent = contentToPost
-
-            if (this._aiContentReadyResolve) {
-              this._aiContentReadyResolve({
-                message: 'AI content ready, proceeding to post.',
-                content: this.postContent,
-                url: link,
-              })
-              this._aiContentReadyResolve = null // 確保只呼叫一次
-            }
-            console.log(
-              `\n[Auto] AI content ready, pausing task for index.js callback.`
-            )
-            return // 暫停執行
+            return // 暫停執行 跳過最後的this.isProcessing = false
           }
         } else {
           console.log('-> Reading...')
-          this.delayWrite(keywordMap.input_right) // 向右鍵
+          this.stream.write(keywordMap.input_right) // 向右鍵
         }
         break
 
       case status.respPost:
         // if (chunk.includes(keywordMap.reTitle)) {
-          console.log(`\n[Auto] run response process...`)
+          console.log(`\n[Auto] Run response process...`)
           await this.delayWrite(keywordMap.input_Yes) // 採用原標題
  
           // if (chunk.includes(keywordMap.reContent)) {
@@ -519,6 +519,7 @@ class Poster {
         break
 
       case status.newPost:
+        console.log('\n[Auto] Run new post process...')
         // 1. 選擇文章類型
         await this.delayWrite(keywordMap.input_1)
         // 2. 輸入標題
@@ -542,6 +543,7 @@ class Poster {
         } else {
           console.log('\n[Auto] Content is empty, skipping post.')
           this.currentState = status.postDone
+          this.stream.write(keywordMap.input_enter)
         }
         break
 
@@ -578,7 +580,7 @@ class Poster {
       board,
       title,
       articleNumber,
-      contentPath,
+      draft,
       target,
       stance,
       isSendByWord,
@@ -589,10 +591,10 @@ class Poster {
     this.board = board
     this.title = title
     this.articleNumber = articleNumber
-    this.contentPath = contentPath
+    this.draft = draft
     this.target = target
     this.stance = stance
-    this.isNewPost = !Number(articleNumber) // 檢查是否為新文章 (不是回文)
+
     this.isSendByWord = !!isSendByWord
     this.isNeedBackup = !!isNeedBackup
 

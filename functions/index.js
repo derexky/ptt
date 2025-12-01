@@ -31,6 +31,7 @@ async function runPost(config) {
       stance: args.stance,
       target: isNewPost ? null : args.target,
       isSendByWord: args.isSendByWord,
+      draft: isNewPost ? args.draft : null,
     })
     .catch((err) => {
       // 捕獲並記錄背景發文的最終錯誤
@@ -39,7 +40,7 @@ async function runPost(config) {
 
   try {
     // 根據 isNewPost 判斷是發新文章還是回覆
-    const aiResult = await controller.aiContentReady
+    const aiResult = await controller.contentReady
 
     return {
       message: aiResult.message,

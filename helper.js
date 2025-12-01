@@ -1,10 +1,10 @@
 const fs = require('fs')
 
-const devideParagraph = (content, lengthPerLine = 50) => {
-  if (!content) return ''
+const devideParagraph = (raw, lengthPerLine = 50) => {
+  if (!raw) return ''
 
   // 1. 標準化所有換行符號為單一的 \n，方便後續處理。
-  let normalizedContent = content.replace(/\r\n/g, '\n')
+  let normalizedContent = raw.replace(/\r\n/g, '\n')
 
   // 2. 將文章內容依據一個或多個換行符號分割成多個「段落」
   const paragraphs = normalizedContent.split('\n')
@@ -40,15 +40,15 @@ const devideParagraph = (content, lengthPerLine = 50) => {
 
 const readFile = (file) => {
   try {
-    const content = fs.readFileSync(file, 'utf8')
-    return content
+    const text = fs.readFileSync(file, 'utf8')
+    return text
   } catch (err) {
-    console.error('Content file error:', err.message)
+    console.error('Text file error:', err.message)
   }
 }
 
-const writeFile = (content, path = './tmp') => {
-  fs.writeFile(path, content, 'utf8', (err) => {
+const writeFile = (text, path = './tmp') => {
+  fs.writeFile(path, text, 'utf8', (err) => {
     if (err) {
       console.error('覆蓋錯誤：', err);
       return

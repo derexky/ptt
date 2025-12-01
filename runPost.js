@@ -1,12 +1,13 @@
 require('dotenv').config()
 const { Poster } = require('./poster')
-
+const {readFile} = require('./helper')
 const aliasMap = {
   b: 'board',
   s: 'subject',
   r: 'reply',
-  c: 'content',
-  t: 'target', // 若想多支援 target 的簡寫
+  p: 'path',
+  t: 'target',
+  k: 'kind',
 }
 
 const rawArgs = process.argv.slice(2)
@@ -33,11 +34,11 @@ for (let i = 0; i < rawArgs.length; i++) {
 
 // 檢查必要參數
 if (!args.board) {
-  console.error('❌ 缺少必要參數: --board <看板名稱>');
-  console.error('用法:');
-  console.error('  新文章: node runPost.js --board Gossiping --title "標題" --content ./content.txt');
-  console.error('  回文:   node runPost.js --board Gossiping --reply 123456 --target ABCD');
-  process.exit(1);
+  console.error('❌ 缺少必要參數: --board <看板名稱>')
+  console.error('用法:')
+  console.error('  新文章: node runPost.js --board Gossiping --subject "標題" --content ./content')
+  console.error('  回文:   node runPost.js --board Gossiping --reply 123456 --target ABCD')
+  process.exit(1)
 }
 
 const isNewPost = !!args.subject
@@ -47,18 +48,26 @@ const password = process.env.PTT_PASSWORD || 'your_ptt_password'
 const isSendByWord = true
 
 async function runPost() {
-  const controller = new Poster(id, password) 
-
+  const controller = new Poster(id, password)
+  const draft = isNewPost && args.path ? readFile(args.path) : null
+  const _ = controller
+      .postArticle({
+        board: args.board,
+        title: isNewPost ? args.subject : null,
+        articleNumber: isNewPost ? null : args.reply,
+        stance: args.stance,
+        target: args.target,
+        isSendByWord,
+        draft,
+      })
+      .catch((err) => {
+        // 捕獲並記錄背景發文的最終錯誤
+        logger.error(`Background posting failed:`, err.message)
+      })
   try {
-    const result = await controller.postArticle({
-      board: args.board,
-      title: isNewPost ? args.subject : null,
-      articleNumber: isNewPost ? null : args.reply,
-      contentPath: isNewPost ? args.content : null,
-      target: isNewPost ? null : args.target,
-      isSendByWord,
-    })
-    console.log("Controller Result:", result) 
+    const result = await controller.contentReady
+    console.log("Content Result:", result.content)
+    await controller.continueState()
   } catch (error) {
     console.error("Controller Error:", error.message) 
   }
