@@ -77,7 +77,7 @@ class Poster {
     // 任務參數
     this.board = null
     this.title = null
-    this.articleNumber = null
+    this.aid = null
     this.contentPath = null
     this.target = null
     this.stance = null
@@ -368,7 +368,7 @@ class Poster {
               await this.delayWrite(keywordMap.input_post)
               this.currentState = status.newPost  
             } else {
-              await this.delayWrite(`${this.articleNumber}${keywordMap.input_enter}`) 
+              await this.delayWrite(`${this.aid}${keywordMap.input_enter}`) 
               this.currentState = status.atArticleTitle 
             }
           }
@@ -397,9 +397,9 @@ class Poster {
             const article = { content }//await getArticle(link)
             
             if(article) {
-              writeFile(article.content, `./backup/${this.board.toLowerCase()}-${this.articleNumber}`) 
+              writeFile(article.content, `./backup/${this.board.toLowerCase()}-${this.aid}`) 
 
-              const backupPath = `./backup/RE:${this.board.toLowerCase()}-${this.articleNumber}` 
+              const backupPath = `./backup/RE:${this.board.toLowerCase()}-${this.aid}` 
               const backupContent = readFile(backupPath) 
 
               let contentToPost = '' 
@@ -482,15 +482,15 @@ class Poster {
      * @returns {Promise<object>} - 包含執行結果的 Promise
      */
     postArticle = (options) => {
-      const { board, title, articleNumber, contentPath, target, isSendByWord } = options 
+      const { board, title, aid, contentPath, target, isSendByWord } = options 
 
       // 注入參數
       this.board = board 
       this.title = title 
-      this.articleNumber = articleNumber 
+      this.aid = aid 
       this.contentPath = contentPath 
       this.target = target 
-      this.isNewPost = !Number(articleNumber) // 檢查是否為新文章 (不是回文)
+      this.isNewPost = !Number(aid) // 檢查是否為新文章 (不是回文)
       this.isSendByWord = isSendByWord
 
       return new Promise((resolve, reject) => {

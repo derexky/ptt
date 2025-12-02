@@ -27,11 +27,12 @@ async function runPost(config) {
     .postArticle({
       board: args.board,
       title: isNewPost ? args.subject : null,
-      articleNumber: isNewPost ? null : args.reply,
+      aid: isNewPost ? null : args.reply.replace(/^#/, ''),
       stance: args.stance,
       target: isNewPost ? null : args.target,
       isSendByWord: args.isSendByWord,
       draft: isNewPost ? args.draft : null,
+      isNeedBackup: false,
     })
     .catch((err) => {
       // 捕獲並記錄背景發文的最終錯誤

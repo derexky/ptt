@@ -102,6 +102,7 @@ GEMINI_API_KEY=your_api_key
 | `-b` | `--board` | ✓ | 目標看板名稱 |
 | `-s` | `--subject` | △ | 新文章標題 (發新文時必填) |
 | `-r` | `--reply` | △ | 回覆的文章編號 (回文時必填) |
+| `-a` | `--aid` | △ | 查詢的文章代碼 (查詢時必填，格式: M.1234567890.ABCD) |
 | `-p` | `--path` | - | 文章內容檔案路徑 |
 | `-t` | `--target` | - | 回覆目標 |
 | `-k` | `--kind` | - | 文章類型(目前沒用到) |
@@ -124,10 +125,10 @@ node runPost.js -b Gossiping -s "測試標題" -p ./content.txt
 #### 回覆文章
 
 ```bash
-npm run test -- -b Gossiping -r 123456 -t "某人事物"
+npm run test -- -b Gossiping -r "#c8763" -t "某人事物"
 
 # 回覆指定文章
-node runPost.js --board Gossiping --reply 123456 --target "某人事物"
+node runPost.js --board Gossiping --reply "#c8763"  --target "某人事物"
 
 # 使用短參數
-node runPost.js -b Gossiping -r 123456 -t "某人事物"
+node runPost.js -b Gossiping -r "#c8763" -t "某人事物"

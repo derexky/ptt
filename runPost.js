@@ -5,6 +5,7 @@ const aliasMap = {
   b: 'board',
   s: 'subject',
   r: 'reply',
+  a: 'aid',
   p: 'path',
   t: 'target',
   k: 'kind',
@@ -41,6 +42,8 @@ if (!args.board) {
   process.exit(1)
 }
 
+const isNeedBackup = process.env.BUILD_ENV === 'dev'
+
 const isNewPost = !!args.subject
 
 const id = process.env.PTT_ID || 'your_ptt_id'
@@ -50,15 +53,17 @@ const isSendByWord = true
 async function runPost() {
   const controller = new Poster(id, password)
   const draft = isNewPost && args.path ? readFile(args.path) : null
+
   const _ = controller
       .postArticle({
         board: args.board,
         title: isNewPost ? args.subject : null,
-        articleNumber: isNewPost ? null : args.reply,
+        aid: isNewPost ? null : (args.aid ? String(args.aid).replace(/^#/, '') : (args.reply ? String(args.reply).replace(/^#/, '') : null)),
         stance: args.stance,
         target: args.target,
         isSendByWord,
         draft,
+        isNeedBackup,
       })
       .catch((err) => {
         // 捕獲並記錄背景發文的最終錯誤

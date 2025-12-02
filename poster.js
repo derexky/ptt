@@ -89,7 +89,7 @@ class Poster {
     // 任務參數
     this.board = null
     this.title = null
-    this.articleNumber = null
+    this.aid = null
     this.draft = null
     this.target = null
     this.stance = null
@@ -99,7 +99,7 @@ class Poster {
   continueState = () => {
     if (this.stream) {
       console.log('\n[Auto] Resuming PTT process...')
-      const isNewPost = !Number(this.articleNumber)
+      const isNewPost = !this.aid
       this.currentState = isNewPost ? status.newPost : status.respPost
       this.isProcessing = false
       const input = isNewPost ? keywordMap.input_post : keywordMap.input_resp
@@ -439,14 +439,14 @@ class Poster {
       case status.onBoard:
         if (chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
           console.log('\n[Auto] On board, search/starting post...')
-          const isNewPost = !Number(this.articleNumber) // 檢查是否為新文章 (不是回文)
+          const isNewPost = !this.aid // 檢查是否為新文章 (不是回文)
           if (isNewPost) {
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
             this.currentState = status.atArticleTitle
             this.stream.write(
-              `${this.articleNumber}${keywordMap.input_enter}`
+              `#${this.aid}${keywordMap.input_enter}`
             )
           }
         }
@@ -481,11 +481,11 @@ class Poster {
             if (this.isNeedBackup)
               writeFile(
                 article.content,
-                `./backup/${this.board.toLowerCase()}-${this.articleNumber}`
+                `./backup/${this.board.toLowerCase()}-${this.aid}`
               )
 
             const backupPath = `./backup/RE:${this.board.toLowerCase()}-${
-              this.articleNumber
+              this.aid
             }`
             const backupContent = readFile(backupPath)
 
@@ -494,7 +494,7 @@ class Poster {
             } else {
               this.postContent = await this.getAiText(article.content)
 
-              if (this.isNeedBackup) writeFile(contentToPost, backupPath)
+              if (this.isNeedBackup) writeFile(this.postContent, backupPath)
             }
 
             this.handleResolve({ text: this.postContent, link })
@@ -579,7 +579,7 @@ class Poster {
     const {
       board,
       title,
-      articleNumber,
+      aid,
       draft,
       target,
       stance,
@@ -590,7 +590,7 @@ class Poster {
     // 注入參數
     this.board = board
     this.title = title
-    this.articleNumber = articleNumber
+    this.aid = aid
     this.draft = draft
     this.target = target
     this.stance = stance
