@@ -1,3 +1,6 @@
+# 忽略本地 Firebase 設定檔，用於儲存敏感 URL
+hosting_secrets.json
+
 external/
 # Logs
 logs

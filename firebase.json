@@ -10,5 +10,36 @@
         "firebase-debug.*.log"
       ]
     }
-  ]
+  ],
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/us",
+        "run": {
+          "serviceId": "postus",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/api/asia",
+        "run": {
+          "serviceId": "post",
+          "region": "asia-east1"
+        }
+      },
+      {
+        "source": "/api/eu",
+        "run": {
+          "serviceId": "posteu",
+          "region": "europe-west1"
+        }
+      }
+    ]
+  }
 }

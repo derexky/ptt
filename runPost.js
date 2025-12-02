@@ -67,7 +67,7 @@ async function runPost() {
   try {
     const result = await controller.contentReady
     console.log("Content Result:", result.content)
-    await controller.continueState()
+    controller.continueState()
   } catch (error) {
     console.error("Controller Error:", error.message) 
   }

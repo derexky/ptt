@@ -96,14 +96,14 @@ class Poster {
     this.isNeedBackup = false
   }
 
-  continueState = async () => {
+  continueState = () => {
     if (this.stream) {
       console.log('\n[Auto] Resuming PTT process...')
       const isNewPost = !Number(this.articleNumber)
       this.currentState = isNewPost ? status.newPost : status.respPost
       this.isProcessing = false
       const input = isNewPost ? keywordMap.input_post : keywordMap.input_resp
-      await this.delayWrite(input)
+      this.stream.write(input)
     }
   }
 
@@ -510,7 +510,7 @@ class Poster {
       case status.respPost:
         // if (chunk.includes(keywordMap.reTitle)) {
           console.log(`\n[Auto] Run response process...`)
-          await this.delayWrite(keywordMap.input_Yes) // 採用原標題
+          this.stream.write(keywordMap.input_Yes) // 採用原標題
  
           // if (chunk.includes(keywordMap.reContent)) {
           await this.delayWrite(keywordMap.input_No) // 不引用原文
@@ -521,7 +521,7 @@ class Poster {
       case status.newPost:
         console.log('\n[Auto] Run new post process...')
         // 1. 選擇文章類型
-        await this.delayWrite(keywordMap.input_1)
+        this.stream.write(keywordMap.input_1)
         // 2. 輸入標題
         await this.delayWrite(this.title + keywordMap.input_enter)
         this.currentState = status.startPost

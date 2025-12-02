@@ -61,9 +61,18 @@ const config =  {
 }
 
 const createStreamHandler = async (request, response) => {
-  // 1. 設置 CORS 標頭 (可選，如果您從前端網頁調用)
-  // response.set('Access-Control-Allow-Origin', '*');
+  // 1. 設置 CORS 標頭 (必須為所有請求設置，包括 OPTIONS)
+  response.set('Access-Control-Allow-Origin', '*')
+  response.set('Access-Control-Allow-Methods', 'POST, OPTIONS') // 允許 POST 和 OPTIONS
+  response.set('Access-Control-Allow-Headers', 'Content-Type') // 允許 Content-Type 標頭
 
+  // 1.1 處理 OPTIONS 預檢請求 (Preflight Request)
+  if (request.method === 'OPTIONS') {
+    // 如果是 OPTIONS 請求，只需返回 204 (No Content) 狀態碼
+    // 瀏覽器收到這些標頭後就會允許後續的 POST 請求
+    response.status(204).send('')
+    return
+  }
   // 2. 獲取 HTTP 請求 Body 中的 JSON 數據
   const body = request.body
   logger.info('Received request body:', body)
@@ -90,7 +99,7 @@ const createStreamHandler = async (request, response) => {
 
     if (controller) {
       console.log(`\n[Auto] Resuming task in background.`)
-      await controller.continueState()
+      controller.continueState()
       await finalPostPromise.finally(() => {
         console.log(
           `\n[Auto] Background task finished and cleared from activeTasks.`
@@ -107,11 +116,26 @@ const createStreamHandler = async (request, response) => {
   }
 }
 
-// 區域 A: us-central1 (default)
+// 區域 A: us-central1 (default)(Iowa)
 exports.postUs = onRequest(config, createStreamHandler)
 
-// 區域 B: asia-east1
+// 區域 B: asia-east1 (Taiwan)
 exports.post = onRequest({ ...config,region: 'asia-east1' }, createStreamHandler)
 
-// 區域 C: europe-west1
+// 區域 C: europe-west1 (Belgium)
 exports.postEu = onRequest({ ...config, region: 'europe-west1' }, createStreamHandler)
+
+// // 區域 D: us-east1 (South Carolina)
+// exports.postUs_sc = onRequest({ ...config, region: 'us-east1' }, createStreamHandler)
+
+// // 區域 E: us-west1 (Oregon)
+// exports.postUs_o = onRequest({ ...config, region: 'us-west1' }, createStreamHandler)
+
+// // 區域 F: asia-east2 (Hong Kong)
+// exports.postAsia_h = onRequest({ ...config, region: 'asia-east2' }, createStreamHandler)
+
+// // 區域 G: europe-north1 (Finland)
+// exports.postEu_f = onRequest({ ...config, region: 'europe-west2' }, createStreamHandler)
+
+// // 區域 H: asia-northeast1 (Tokyo)
+// exports.postAsia_t = onRequest({ ...config, region: 'asia-northeast1' }, createStreamHandler)

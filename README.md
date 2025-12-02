@@ -92,6 +92,7 @@ node runPost.js [options]
 ```env
 PTT_ID=your_ptt_id
 PTT_PASSWORD=your_ptt_password
+GEMINI_API_KEY=your_api_key
 ```
 
 ### 命令列參數
@@ -130,10 +131,3 @@ node runPost.js --board Gossiping --reply 123456 --target "某人事物"
 
 # 使用短參數
 node runPost.js -b Gossiping -r 123456 -t "某人事物"
-```
-
-{
-  "success": false,
-  "error": "錯誤訊息"
-}
-```

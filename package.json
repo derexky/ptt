@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "description": "Tools for ptt",
   "scripts": {
-    "test": "node runPost.js"
+    "test": "node runPost.js",
+    "deploy": "firebase deploy --only hosting"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
