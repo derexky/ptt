@@ -10,11 +10,14 @@ const {
   getRandomInt,
 } = require('./helper')
 
+const isDev = process.env.NODE_ENV === 'develop'
+
 const status = {
   init: 0,
   login: 1,
   mainMenu: 3,
   searchBoard: 4,
+  searchArticle: 8,
   atArticleTitle: 5,
   onBoard: 6,
   pause: 7,
@@ -25,6 +28,8 @@ const status = {
   readArticle: 14,
   respPost: 15,
   postDone: 16,
+
+  end: 99,
 }
 
 // 注意：board 關鍵字會動態產生
@@ -35,7 +40,7 @@ const keywordMap = {
   welcome: '請按任意鍵繼續',
   mainMenu: '主功能表',
   searchBoard: '請輸入看板名稱',
-  // onBoard: dynamic
+  overload: '請勿頻繁登入以免造成系統過度負荷',
   writeQuit: '您有一篇文章尚未完成，',
   postType: '種類：',
   postTitle: '標題：',
@@ -78,6 +83,8 @@ class Poster {
 
     this.abortSignal = false
     this.aiContent = null
+
+    this.retryCount = 0
 
     this.contentReady = new Promise((resolve, reject) => {
       this._contentReadyResolve = resolve // 儲存 resolve 函式
@@ -143,11 +150,15 @@ class Poster {
     const progress = Math.round((current / total) * 100)
     // 使用 \r 確保在同一行
     const output = `\r[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`
-    readline.cursorTo(process.stdout, 0)
-    process.stdout.write(output)
+    if (isDev) {
+      readline.cursorTo(process.stdout, 0)
+      process.stdout.write(output)
 
-    if (current === total) {
-      process.stdout.write('\n')
+      if (current === total) {
+        process.stdout.write('\n')
+      }
+    } else {
+      console.log(`[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
     }
   }
 
@@ -181,10 +192,11 @@ class Poster {
         }
       })
     }
-
+  
+    const sendSize = isDev ? 1 : Math.ceil(fullContent.length / 500) // functions上的存活時間大約500次(每秒一次)發送完畢
     let done = false
     while (!done) {
-      done = await sendCharBatch(2)
+      done = await sendCharBatch(sendSize)
     }
 
     await this.finishPost()
@@ -379,7 +391,7 @@ class Poster {
     const previousState = this.currentState
 
     // 優先處理雜訊 (不受狀態影響)
-    if (chunk.includes(keywordMap.welcome)) {
+    if (chunk.includes(keywordMap.welcome) || chunk.includes(keywordMap.overload)) {
       this.stream.write(keywordMap.input_down)
       this.buffer = ''
       this.isProcessing = false
@@ -444,14 +456,17 @@ class Poster {
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
-            this.currentState = status.atArticleTitle
-            this.stream.write(
-              `#${this.aid}${keywordMap.input_enter}`
-            )
+            this.currentState = status.searchArticle
+            this.stream.write('#')
           }
         }
         break
-
+      case status.searchArticle:
+        this.currentState = status.atArticleTitle
+        this.stream.write(
+          `${this.aid}`+ keywordMap.input_enter
+        )
+        break
       case status.atArticleTitle:
         console.log('\n[Auto] At title, entering article...')
         this.currentState = status.readArticle
@@ -459,19 +474,19 @@ class Poster {
         break
 
       case status.readArticle:
-        console.log(`\n[Auto] Read article...`)
-        if (
-          !chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)
-        ) {
+        console.log(`\n[Auto] Read article, ${chunk}`)
+       
+        if (!chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
           this.buffer += chunk
         }
+
         const match = chunk.match(
           /文章網址\s*:\s*(https?:\/\/www\.ptt\.cc\/bbs\/[^\/]+\/M\.\d+\.[A-Z]\.\w+\.html)/i
         )
         if (match) {
           const link = match[1]
           console.log(`\n[Auto] Get link, ${link}...`)
-
+        
           const rawContent = this.buffer
           const content = this.extractPttContent(rawContent)
           // writeFile(content)
@@ -503,7 +518,12 @@ class Poster {
           }
         } else {
           console.log('-> Reading...')
-          this.stream.write(keywordMap.input_right) // 向右鍵
+          this.retryCount++
+          if (this.retryCount >= 10) {
+            console.error('\n[Auto] Failed to extract article link after retries.')
+            throw new Error('Failed to extract article link.')
+          }
+          this.delayWrite(keywordMap.input_right)
         }
         break
 
@@ -550,6 +570,7 @@ class Poster {
       case status.postDone:
         console.log('\n[Auto] Post done.')
         this.conn.end()
+        this.currentState = status.end
         this.finalResolve({
           success: true,
           message: 'Article posted successfully.',

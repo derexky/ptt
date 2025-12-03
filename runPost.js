@@ -42,7 +42,7 @@ if (!args.board) {
   process.exit(1)
 }
 
-const isNeedBackup = process.env.BUILD_ENV === 'dev'
+const isNeedBackup = process.env.NODE_ENV === 'develop'
 
 const isNewPost = !!args.subject
 

@@ -33,9 +33,9 @@ const MIN_INTERVAL = 120000
 
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-async function generateContentByGoogle({ prompt, stance, target = "文中主角", isTroll = true }) {
-  const viewpoint = stance || `你是一位資深鄉民，總是以${isTroll ? '諷刺' : '讚揚'}${target}的立場回應問題，回文中會帶著低俗詼諧且有點嘲諷的語氣`
-
+async function generateContentByGoogle({ prompt, stance, target, isTroll = true }) {
+  let viewpoint = stance || `你是一位資深鄉民，回文中會帶著低俗詼諧且有點嘲諷的語氣` 
+  if(target) viewpoint += `以${isTroll ? '諷刺' : '讚揚'}${target}的客觀態度來回應問題`
   const now = Date.now()
   const timeElapsed = now - lastCallTime
 
@@ -52,7 +52,7 @@ async function generateContentByGoogle({ prompt, stance, target = "文中主角"
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-pro',//目前免費金鑰可以使用的最高階 Pro 模型。提供每日約 50 次請求的免費額度
+    model: 'gemini-2.5-pro', //目前免費金鑰可以使用的最高階 Pro 模型。約 5 RPM（每分鐘請求數）和約 100 RPD（每日請求數）
     systemInstruction: viewpoint,
   })
   const contents = [
