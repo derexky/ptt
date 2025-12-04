@@ -9,6 +9,7 @@ const aliasMap = {
   p: 'path',
   t: 'target',
   k: 'kind',
+  c: 'category',
 }
 
 const rawArgs = process.argv.slice(2)
@@ -58,6 +59,7 @@ async function runPost() {
       .postArticle({
         board: args.board,
         title: isNewPost ? args.subject : null,
+        category: isNewPost ? Number(args.category) : 0,
         aid: isNewPost ? null : (args.aid ? String(args.aid).replace(/^#/, '') : (args.reply ? String(args.reply).replace(/^#/, '') : null)),
         stance: args.stance,
         target: args.target,

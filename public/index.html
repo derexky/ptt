@@ -226,6 +226,16 @@
             <label>草稿內容 (Draft)</label>
             <textarea id="draft" placeholder="請輸入文章內容..."></textarea>
           </div>
+          <div class="full-width">
+            <label>發文類別編號 (Category)</label>
+            <input
+              type="number"
+              id="category"
+              min="1"
+              step="1"
+              placeholder="EX: 1, 2, 3...."
+            />
+          </div>
         </div>
 
         <div id="replyFields" class="grid full-width hidden">
@@ -234,7 +244,7 @@
             <input
               type="text"
               id="replyId"
-              placeholder="例如: #c8763..."
+              placeholder="EX: #c8763..."
             />
           </div>
           <div>
@@ -318,6 +328,7 @@
               subject: isNewPost
                 ? document.getElementById('subject').value
                 : null,
+              category: Number(document.getElementById('category')).value || 1,
               draft: isNewPost ? document.getElementById('draft').value : null,
               reply: !isNewPost
                 ? document.getElementById('replyId').value

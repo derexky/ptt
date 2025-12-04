@@ -39,8 +39,9 @@ firebase deploy --only functions
 | `password` | string | ✓ | 用於登入發文的密碼 |
 | `args.board` | string | ✓ | 目標看板名稱 |
 | `args.subject` | string | △ | 新文章的標題 |
-| `args.draft` | string | - | 新文章的內容草稿 (與 `args.subject` 並用) |
-| `args.reply` | string | △ | 要回覆的文章編號 (當 `args.subject: undefined` 時必填) |
+| `args.draft` | string | △ | 新文章的內容草稿 (與 `args.subject` 並用) |
+| `args.category` | integer | - | 新文章的類別 (與 `args.subject` 並用) |
+| `args.reply` | string | △ | 要回覆的文章編號 (與 `args.subject` 互斥) |
 | `args.target` | string | - | 回覆目標 (與 `args.reply` 並用) |
 | `args.stance` | string | - | AI 生成內容的立場 |
 | `isSendByWord` | boolean | - | 是否以單詞方式發送 (預設為 `false`) |
@@ -105,7 +106,7 @@ GEMINI_API_KEY=your_api_key
 | `-a` | `--aid` | △ | 查詢的文章代碼 (查詢時必填，格式: M.1234567890.ABCD) |
 | `-p` | `--path` | - | 文章內容檔案路徑 |
 | `-t` | `--target` | - | 回覆目標 |
-| `-k` | `--kind` | - | 文章類型(目前沒用到) |
+| `-c` | `--category` | - | 發文類別 |
 | | `--stance` | - | AI 生成內容的立場 |
 
 ### 使用範例
@@ -113,13 +114,13 @@ GEMINI_API_KEY=your_api_key
 #### 發布新文章
 
 ```bash
-npm run test -- -b Gossiping -s "測試標題" -p ./content.txt
+npm run test -- -b Gossiping -s "測試標題" -p ./content
 
 # 使用內容檔案
-node runPost.js --board Gossiping --subject "測試標題" --path ./content.txt
+node runPost.js --board Gossiping --subject "測試標題" --path ./content
 
 # 使用短參數
-node runPost.js -b Gossiping -s "測試標題" -p ./content.txt
+node runPost.js -b Gossiping -s "測試標題" -p ./content
 ```
 
 #### 回覆文章

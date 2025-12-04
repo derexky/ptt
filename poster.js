@@ -42,12 +42,11 @@ const keywordMap = {
   searchBoard: '請輸入看板名稱',
   overload: '請勿頻繁登入以免造成系統過度負荷',
   writeQuit: '您有一篇文章尚未完成，',
-  postType: '種類：',
-  postTitle: '標題：',
+  onCategory: '種類：',
+  onTitle: '標題：',
   reTitle: '採用原標題',
   reContent: '引用原文嗎',
   author: '作者',
-  title: '標題',
   time: '時間',
   board: '看板',
   site: '發信站:',
@@ -100,6 +99,7 @@ class Poster {
     this.draft = null
     this.target = null
     this.stance = null
+    this.category = 1
     this.isNeedBackup = false
   }
 
@@ -408,7 +408,7 @@ class Poster {
 
     if (chunk.includes(keywordMap.deleteLink)) {
       console.log('\n[Auto] Delete link...')
-      this.stream.write(keywordMap.input_Yes)
+      this.stream.write(isDev ? keywordMap.input_No : keywordMap.input_Yes)
       this.buffer = ''
       this.isProcessing = false
       return
@@ -519,7 +519,7 @@ class Poster {
         } else {
           console.log('-> Reading...')
           this.retryCount++
-          if (this.retryCount >= 10) {
+          if (this.retryCount >= 30) {
             console.error('\n[Auto] Failed to extract article link after retries.')
             throw new Error('Failed to extract article link.')
           }
@@ -528,23 +528,27 @@ class Poster {
         break
 
       case status.respPost:
-        // if (chunk.includes(keywordMap.reTitle)) {
+        if (chunk.includes(keywordMap.reTitle)) {
           console.log(`\n[Auto] Run response process...`)
           this.stream.write(keywordMap.input_Yes) // 採用原標題
- 
-          // if (chunk.includes(keywordMap.reContent)) {
-          await this.delayWrite(keywordMap.input_No) // 不引用原文
-          this.currentState = status.startPost // 確認發送完畢後才切換狀態
         // }
+        // if (chunk.includes(keywordMap.reContent)) {
+          this.currentState = status.startPost
+          this.delayWrite(keywordMap.input_No) // 不引用原文
+        }
         break
 
       case status.newPost:
-        console.log('\n[Auto] Run new post process...')
-        // 1. 選擇文章類型
-        this.stream.write(keywordMap.input_1)
-        // 2. 輸入標題
-        await this.delayWrite(this.title + keywordMap.input_enter)
-        this.currentState = status.startPost
+        console.log('\n[Auto] Run new post process...') 
+        if (chunk.includes(keywordMap.onCategory)) {
+          // 1. 選擇文章類型
+          this.stream.write(`${this.category}` + keywordMap.input_enter)
+        }
+        if (chunk.includes(keywordMap.onTitle)) {
+          this.currentState = status.startPost
+          // 2. 輸入標題
+          this.stream.write(this.title + keywordMap.input_enter)
+        }
         break
 
       case status.startPost:
@@ -604,6 +608,7 @@ class Poster {
       draft,
       target,
       stance,
+      category,
       isSendByWord,
       isNeedBackup,
     } = options
@@ -615,6 +620,7 @@ class Poster {
     this.draft = draft
     this.target = target
     this.stance = stance
+    this.category = category
 
     this.isSendByWord = !!isSendByWord
     this.isNeedBackup = !!isNeedBackup

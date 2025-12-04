@@ -27,6 +27,7 @@ async function runPost(config) {
     .postArticle({
       board: args.board,
       title: isNewPost ? args.subject : null,
+      category: Number(args.category) || 1,
       aid: isNewPost ? null : args.reply.replace(/^#/, ''),
       stance: args.stance,
       target: isNewPost ? null : args.target,
