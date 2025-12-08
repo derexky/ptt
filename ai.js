@@ -52,7 +52,7 @@ async function generateContentByGoogle({ prompt, stance, target, isTroll = true 
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-pro', //目前免費金鑰可以使用的最高階 Pro 模型。約 5 RPM（每分鐘請求數）和約 100 RPD（每日請求數）
+    model: 'gemini-2.5-flash',//'gemini-2.5-pro', //目前免費金鑰可以使用的最高階 Pro 模型。約 5 RPM（每分鐘請求數）和約 100 RPD（每日請求數）
     systemInstruction: viewpoint,
   })
   const contents = [

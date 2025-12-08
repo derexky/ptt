@@ -1,5 +1,5 @@
 // ptt-controller.js
-
+const fs = require('fs') // 假設您已引入
 const { Client } = require('ssh2')
 const readline = require('readline') // 引入 readline 用於進度條
 const { generateContentByGoogle } = require('./ai')
@@ -17,10 +17,11 @@ const status = {
   login: 1,
   mainMenu: 3,
   searchBoard: 4,
-  searchArticle: 8,
-  atArticleTitle: 5,
-  onBoard: 6,
-  pause: 7,
+  onBoard: 5,
+  searchArticle: 6,
+  atArticleTitle: 7,
+ 
+  pause: 8,
   writeQuit: 10,
   newPost: 11,
   startPost: 12,
@@ -40,6 +41,8 @@ const keywordMap = {
   welcome: '請按任意鍵繼續',
   mainMenu: '主功能表',
   searchBoard: '請輸入看板名稱',
+  searchArticle: '搜尋文章代碼(AID)',
+  inArticle: '目前顯示: 第',
   overload: '請勿頻繁登入以免造成系統過度負荷',
   writeQuit: '您有一篇文章尚未完成，',
   onCategory: '種類：',
@@ -379,108 +382,145 @@ class Poster {
     return devideParagraph(rawText)
   }
 
+  handleNoise = (chunk) => {
+    let handled = false
+    let logMessage = ''
+    let writeInput = ''
+
+    if (chunk.includes(keywordMap.welcome) || chunk.includes(keywordMap.overload)) {
+      writeInput = keywordMap.input_right
+      logMessage = chunk.includes(keywordMap.welcome) ? 'Skipping welcome screen.' : 'Skipping overload warning.'
+      handled = true
+    } else if (chunk.includes(keywordMap.writeQuit)) {
+      writeInput = keywordMap.input_Quit
+      logMessage = 'Quitting unfinished article/draft.'
+      handled = true
+    } else if (chunk.includes(keywordMap.deleteLink)) {
+      writeInput = isDev ? keywordMap.input_No : keywordMap.input_Yes;
+      logMessage = `Handling existing link deletion (Input: ${isDev ? 'No' : 'Yes'}).`
+      handled = true
+    }
+
+    if (handled) {
+      console.log(`\n[Auto] Noise Handler (State ${this.currentState}): ${logMessage}`)
+      this.stream.write(writeInput)
+      this.buffer = ''
+      this.isProcessing = false
+    }
+    return handled
+  }
+
   /**
    * 核心狀態處理機
    */
   handleState = async (chunk, resolve, reject) => {
     // console.log(`[State${this.currentState}]${this.isProcessing} ${chunk}`)
+    if (isDev) {
+        // 將接收到的 chunk 寫入 log 檔案
+      fs.appendFileSync(
+        'debug.log', 
+        `\r\n\n---Processing: ${this.isProcessing}, STATE: ${this.currentState}, TIME: ${new Date().toISOString()} ---\n` + chunk
+      )
+    }
+
     if (this.isProcessing) return
 
     this.isProcessing = true
 
     const previousState = this.currentState
+    let match
 
     // 優先處理雜訊 (不受狀態影響)
-    if (chunk.includes(keywordMap.welcome) || chunk.includes(keywordMap.overload)) {
-      this.stream.write(keywordMap.input_down)
-      this.buffer = ''
-      this.isProcessing = false
-      return
-    }
-
-    if (chunk.includes(keywordMap.writeQuit)) {
-      console.log('\n[Auto] Quit board...')
-      this.stream.write(keywordMap.input_Quit)
-      this.buffer = ''
-      this.isProcessing = false
-      return
-    }
-
-    if (chunk.includes(keywordMap.deleteLink)) {
-      console.log('\n[Auto] Delete link...')
-      this.stream.write(isDev ? keywordMap.input_No : keywordMap.input_Yes)
-      this.buffer = ''
-      this.isProcessing = false
-      return
-    }
+    if(this.handleNoise(chunk)) return
 
     // --- 狀態機邏輯 ---
     switch (this.currentState) {
       case status.init:
         if (chunk.includes(keywordMap.account)) {
           console.log('\n[Auto] Sending ID...')
-          this.currentState = status.login
-          this.stream.write(this.id + keywordMap.input_enter)
+
+          this.stream.write(
+            this.id + keywordMap.input_enter,
+            _ => this.currentState = status.login
+          )
         }
         break
 
       case status.login:
         if (chunk.includes(keywordMap.password)) {
           console.log('\n[Auto] Sending password...')
-          this.currentState = status.mainMenu
-          this.stream.write(this.password + keywordMap.input_enter) 
+
+          this.stream.write(
+            this.password + keywordMap.input_enter,
+            _ => this.currentState = status.mainMenu
+          ) 
         }
         break
 
       case status.mainMenu:
         if (chunk.includes(keywordMap.mainMenu)) {
           console.log('\n[Auto] At main menu, entering board search...')
-          this.currentState = status.searchBoard
-          this.stream.write(keywordMap.input_search)         
+
+          this.stream.write(
+            keywordMap.input_search,
+            _ => this.currentState = status.searchBoard
+          )
         }
         break
 
       case status.searchBoard:
         if (chunk.includes(keywordMap.searchBoard)) {
           console.log('\n[Auto] Searching board...')
-          this.currentState = status.onBoard
-          this.stream.write(this.board + keywordMap.input_enter)
+
+          this.stream.write(
+            this.board + keywordMap.input_enter,
+            _ => this.currentState = status.onBoard
+          )
         }
         break
 
       case status.onBoard:
-        if (chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
+        if (chunk.toLowerCase().includes(`《${this.board.toLowerCase()}》`)) {
           console.log('\n[Auto] On board, search/starting post...')
           const isNewPost = !this.aid // 檢查是否為新文章 (不是回文)
           if (isNewPost) {
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
-            this.currentState = status.searchArticle
-            this.stream.write('#')
+            this.stream.write(`#`, _ => this.currentState = status.searchArticle)
           }
         }
         break
       case status.searchArticle:
-        this.currentState = status.atArticleTitle
-        this.stream.write(
-          `${this.aid}`+ keywordMap.input_enter
-        )
+        if(chunk.includes(keywordMap.searchArticle)) {
+          console.log('\n[Auto] On board, searching article...')
+
+          this.stream.write(
+            `${this.aid}`+ keywordMap.input_enter,
+            _ => this.currentState = status.atArticleTitle
+          )
+        }
         break
       case status.atArticleTitle:
-        console.log('\n[Auto] At title, entering article...')
-        this.currentState = status.readArticle
-        this.stream.write(keywordMap.input_right) // 向右鍵
+        match = chunk.match(/\s*(\x08*)?[●>]?\s*\d+\s*/)
+        if (match) {
+          console.log('\n[Auto] At title, entering article...', chunk)
+          
+          this.stream.write(
+            keywordMap.input_right,
+            _ => this.currentState = status.readArticle
+          )
+        }
         break
 
       case status.readArticle:
-        console.log(`\n[Auto] Read article, ${chunk}`)
-       
+        console.log(`\n[Auto] Read article`)
+
         if (!chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
           this.buffer += chunk
         }
 
-        const match = chunk.match(
+        match = chunk.match(
           /文章網址\s*:\s*(https?:\/\/www\.ptt\.cc\/bbs\/[^\/]+\/M\.\d+\.[A-Z]\.\w+\.html)/i
         )
         if (match) {
@@ -523,7 +563,11 @@ class Poster {
             console.error('\n[Auto] Failed to extract article link after retries.')
             throw new Error('Failed to extract article link.')
           }
-          this.delayWrite(keywordMap.input_right)
+          this.stream.write(
+            keywordMap.input_right,
+            _ => this.isProcessing = false
+          )
+          return
         }
         break
 
