@@ -66,7 +66,7 @@ const keywordMap = {
   input_right: '\x1b[C', // 向右鍵
   input_search: 's',
   input_post: '\x10', // Ctrl + P
-  input_resp: 'r\r\n',
+  input_resp: 'y\r\n',
   input_1: '1\r\n',
 }
 // --- 狀態與關鍵字定義結束 ---
@@ -378,8 +378,8 @@ class Poster {
       })
       rawText = aiContent
     }
-
-    return devideParagraph(rawText)
+    const rnd = getRandomInt(30, 60)
+    return devideParagraph(rawText, rnd)
   }
 
   handleNoise = (chunk) => {
@@ -504,7 +504,7 @@ class Poster {
       case status.atArticleTitle:
         match = chunk.match(/\s*(\x08*)?[●>]?\s*\d+\s*/)
         if (match) {
-          console.log('\n[Auto] At title, entering article...', chunk)
+          console.log('\n[Auto] At title, entering article...')
           
           this.stream.write(
             keywordMap.input_right,
@@ -575,10 +575,10 @@ class Poster {
         if (chunk.includes(keywordMap.reTitle)) {
           console.log(`\n[Auto] Run response process...`)
           this.stream.write(keywordMap.input_Yes) // 採用原標題
-        // }
-        // if (chunk.includes(keywordMap.reContent)) {
+        }
+        if (chunk.includes(keywordMap.reContent)) {
           this.currentState = status.startPost
-          this.delayWrite(keywordMap.input_No) // 不引用原文
+          this.stream.write(keywordMap.input_No) // 不引用原文
         }
         break
 
