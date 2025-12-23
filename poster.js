@@ -293,7 +293,7 @@ class Poster {
       // 判斷是否為標頭關鍵字
       if (
         trimmedLine.startsWith(keywordMap.author) ||
-        trimmedLine.startsWith(keywordMap.title) ||
+        trimmedLine.startsWith(keywordMap.onTitle) ||
         trimmedLine.startsWith(keywordMap.time) ||
         trimmedLine.startsWith(keywordMap.board)
       ) {

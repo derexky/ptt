@@ -9,7 +9,7 @@
     "logs": "firebase functions:log",
     "predeploy": "npm run copy:env && npm run copy:external",
     "copy:env": "cp ../.env .",
-    "copy:external": "mkdir -p external && cp ../poster.js ../ai.js ../helper.js ./external"
+    "copy:external": "mkdir -p external && cp ../posterWS.js ../poster.js ../ai.js ../helper.js ./external"
   },
   "engines": {
     "node": "22"
