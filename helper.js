@@ -1,43 +1,57 @@
 const fs = require('fs')
 
-const devideParagraph = (raw, lengthPerLine = 50) => {
+const divideParagraph = (raw, lengthPerLine = 50) => {
+
   if (!raw) return ''
 
-  // 1. 標準化所有換行符號為單一的 \n，方便後續處理。
-  let normalizedContent = raw.replace(/\r\n/g, '\n')
+  // 1. 標準化換行符號
+  let normalized = raw.replace(/\r\n/g, '\n')
 
-  // 2. 將文章內容依據一個或多個換行符號分割成多個「段落」
-  const paragraphs = normalizedContent.split('\n')
+  // 2. 依照「空白行」來分割段落 (匹配兩個以上的換行)
+  // 這樣即使段落內有單個換行，也會被視為同一段
+  const paragraphs = normalized.split(/\n\s*\n/)
+
+  // 定義常見的斷句標點符號 (包含中英文)
+  const punctuationRegex = /[,.!?;:，。！？；：、]/
 
   const formattedParagraphs = paragraphs.map(paragraph => {
-    // 移除段落前後的空白字元
-    let cleanParagraph = paragraph.trim()
+    // 移除段落內原本所有的換行符號，並將前後空白修掉
+    // 這樣段落會變成一條完整的長字串
+    let cleanParagraph = paragraph.replace(/\n/g, '').trim()
+    if (cleanParagraph.length <= lengthPerLine) return cleanParagraph
 
-    if (cleanParagraph.length === 0) {
-      // 如果原本就是空行，則保留為 \n（map 最後會 join()，所以這裡回傳空字串即可）
-      return ''
-    }
+    let result = ''
+    let currentText = cleanParagraph
 
-    // 3. 針對長度超過 lengthPerLine 的段落進行強制分行
-    if (cleanParagraph.length > lengthPerLine) {
-      // 創建正規表達式：(.{1,N})，匹配 1 到 N 個字元
-      const regex = new RegExp(`(.{1,${lengthPerLine}})`, 'g')
+    // 3. 迴圈處理長段落
+    while (currentText.length > lengthPerLine) {
+      // 取得預定長度內的片段
+      let chunk = currentText.substring(0, lengthPerLine);
       
-      // 在每個匹配的區塊後面加入 \n
-      // 使用 trim() 避免在段落結尾多一個 \n
-      return cleanParagraph.replace(regex, '$1\n').trim()
-    } else {
-      // 如果段落長度沒超過，則完整保留該段落
-      return cleanParagraph
+      // 尋找該片段中最後一個標點符號的位置
+      let lastPuncIndex = -1
+      for (let i = chunk.length - 1; i >= 0; i--) {
+        if (punctuationRegex.test(chunk[i])) {
+          lastPuncIndex = i
+          break
+        }
+      }
+
+      // 如果有找到標點符號，就在該標點後斷行；否則強制在 lengthPerLine 處斷行
+      let breakIndex = (lastPuncIndex !== -1) ? lastPuncIndex + 1 : lengthPerLine
+      
+      result += currentText.substring(0, breakIndex).trim() + '\n'
+      currentText = currentText.substring(breakIndex).trim()
     }
+
+    // 加上剩餘的文字
+    result += currentText
+    return result
   })
 
-  // 4. 使用 \n 將所有處理後的段落重新連接起來
-  // 如果原始內容有多個連續換行，如 \n\n，map 會產生 ['', 'paragraph', '']
-  // join('\n') 後仍會是 \n\nparagraph\n
-  return formattedParagraphs.join('\n')
+  // 4. 最後段落與段落之間，用「兩個換行」連接，產生空白行效果
+  return formattedParagraphs.join('\n\n')
 }
-
 const readFile = (file) => {
   try {
     const text = fs.readFileSync(file, 'utf8')
@@ -50,7 +64,7 @@ const readFile = (file) => {
 const writeFile = (text, path = './tmp') => {
   fs.writeFile(path, text, 'utf8', (err) => {
     if (err) {
-      console.error('覆蓋錯誤：', err);
+      console.error('覆蓋錯誤：', err)
       return
     }
     console.log(`覆蓋寫入完成！檔案：${path}`)
@@ -71,7 +85,7 @@ const getRandomInt = (min, max) => {
 }
 
 module.exports = {
-  devideParagraph,
+  divideParagraph,
   readFile,
   writeFile,
   getRandomInt,

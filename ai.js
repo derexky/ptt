@@ -42,29 +42,43 @@ async function generateContentByGoogle({ prompt, stance, target, isTroll = true 
   // 【新增】檢查是否已滿足最小間隔時間
   if (lastCallTime !== 0 && timeElapsed < MIN_INTERVAL) {
     const timeToWait = MIN_INTERVAL - timeElapsed
-    const minutesToWait = (timeToWait / 60000).toFixed(2)
+    const secToWait = (timeToWait / 1000).toFixed(3)
     
-    console.warn(`\n[AI Rate Limit] 距離上次呼叫 AI 不足 2 分鐘，請等待 ${minutesToWait} 分鐘後再試。`)
-    // 您可以選擇在這裡拋出錯誤，或回傳一個空字串/預設值
-    return
-    // 或者可以拋出錯誤讓外部處理：
-    // throw new Error(`Rate limit: Must wait ${minutesToWait} minutes before calling AI again.`)
+    const errorMessage = `Rate limit: Must wait ${secToWait} minutes before calling AI again.`
+    console.warn(`\n[AI Rate Limit] ${errorMessage}`)
+    return {
+      success: false,
+      message: errorMessage
+    }
   }
 
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',//'gemini-2.5-pro', //目前免費金鑰可以使用的最高階 Pro 模型。約 5 RPM（每分鐘請求數）和約 100 RPD（每日請求數）
-    systemInstruction: viewpoint,
-  })
-  const contents = [
-    { role: "user", parts: [{ text: prompt }] } // 修正: 將 prompt 包裝成 user 內容
-  ]
-  const result = await model.generateContent({ contents })
+  try {
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',//'gemini-2.5-pro', //目前免費金鑰可以使用的最高階 Pro 模型。約 5 RPM（每分鐘請求數）和約 100 RPD（每日請求數）
+      systemInstruction: viewpoint,
+    })
+    const contents = [
+      { role: "user", parts: [{ text: prompt }] } // 修正: 將 prompt 包裝成 user 內容
+    ]
+    const result = await model.generateContent({ contents })
 
-  // 【修改】成功呼叫後，更新上次呼叫時間
-  lastCallTime = Date.now()
+    // 【修改】成功呼叫後，更新上次呼叫時間
+    lastCallTime = Date.now()
 
-  // console.log(result.response.text())
-  return result.response.text()
+    return {
+      success: true,
+      value: result.response.text()
+    } 
+
+  } catch (error) {
+    // 捕獲並處理錯誤
+    console.error('\n[AI Error] 呼叫 Google Generative AI 失敗:', error.message)
+    // 發生錯誤時，不更新 lastCallTime，以便在下一次重試時再次檢查速率限制
+    return {
+      success: false,
+      message: error.message
+    }
+  }
 }
 
 

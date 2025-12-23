@@ -3,7 +3,7 @@
 const readline = require('readline') // 引入 readline 用於進度條
 const { w3cwebsocket } = require('websocket')
 const { generateContentByGoogle } = require('./ai') // 假設這是您的 AI 函式
-const { devideParagraph, writeFile, readFile, getRandomInt } = require('./helper') // 假設這是您的輔助函式
+const { divideParagraph, writeFile, readFile, getRandomInt } = require('./helper') // 假設這是您的輔助函式
 const iconv = require('iconv-lite')
 
 // --- 狀態與關鍵字定義 (通常會放在獨立檔案，這裡為方便展示，直接定義) ---
@@ -364,7 +364,7 @@ class Poster {
             console.log('\n[Auto] On board, search/starting post...') 
             if (this.isNewPost) {
               const content = readFile(this.contentPath) 
-              this.postContent = devideParagraph(content) 
+              this.postContent = divideParagraph(content) 
               await this.delayWrite(keywordMap.input_post)
               this.currentState = status.newPost  
             } else {
@@ -404,13 +404,13 @@ class Poster {
 
               let contentToPost = '' 
               if(backupContent) {
-                contentToPost = devideParagraph(backupContent) 
+                contentToPost = divideParagraph(backupContent) 
               } else {
                 // AI 生成內容
                 const prompt = article.content + '\r\n根據上述內容發表看法,\r\n回覆的文章不要包括上述內容的引文和推文,\r\n也不需要作者,看板,標題,時間的格式化部分'
                 const aiContent = await generateContentByGoogle({prompt, stance: this.stance, target: this.target}) 
                 if(aiContent) {
-                  contentToPost = devideParagraph(aiContent) 
+                  contentToPost = divideParagraph(aiContent) 
                   writeFile(contentToPost, backupPath) 
                 }
               }
