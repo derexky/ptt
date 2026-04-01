@@ -314,7 +314,11 @@ async function crawlSinglePage(pageNum) {
 /**
  * 爬取 PTT 看板並儲存到 MySQL
  */
-async function crawlAllPosts() {
+async function crawlAllPosts(boardName) {
+  if (boardName) {
+    config.boardName = boardName;
+    config.statsFileName = path.join(__dirname, `${config.boardName}_stats.json`);
+  }
   console.log(`開始爬取 PTT 看板：${config.boardName}...`)
 
   try {
@@ -511,7 +515,11 @@ async function crawlContentAndComments(articleId, link) {
   }
 }
 
-async function crawlNewPosts(lastestPageCount = 10) {
+async function crawlNewPosts(lastestPageCount = 10, boardName) {
+  if (boardName) {
+    config.boardName = boardName;
+    config.statsFileName = path.join(__dirname, `${config.boardName}_stats.json`);
+  }
   console.log(`開始爬取 PTT 看板：${config.boardName}...`);
 
   try {

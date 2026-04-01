@@ -105,6 +105,8 @@ class Poster {
     this.stance = null
     this.category = 1
     this.isNeedBackup = false
+    /** WSS 在雲端常把一屏切成多個 frame，單包可能不含完整《看板》字樣 */
+    this.onBoardScreenBuf = ''
   }
 
   send = (text, callback) => {
@@ -352,6 +354,7 @@ class Poster {
 
     if (!text || !text.length) {
       this.stream.close()
+      this.isProcessing = false
       this.finalResolve({
         success: false,
         message: 'Content is empty.',
@@ -368,6 +371,9 @@ class Poster {
       this._contentReadyResolve = null // 確保只呼叫一次
       console.log(`\n[Auto] Content ready, pausing task for index.js callback.`)
     }
+    // readArticle 會提早 return 而跳過 handleState 結尾的 isProcessing = false；
+    // 暫停期間若維持 true，WebSocket 封包會全部被丟棄，continueState 後對不到回文畫面。
+    this.isProcessing = false
   }
 
   getAiText = async (drift) => {
@@ -483,23 +489,36 @@ class Poster {
 
           this.send(
             this.board + keywordMap.input_enter,
-            _ => this.currentState = status.onBoard
+            _ => {
+              this.currentState = status.onBoard
+              this.onBoardScreenBuf = ''
+            }
           )
         }
         break
 
-      case status.onBoard:
-        if (chunk.toLowerCase().includes(`《${this.board.toLowerCase()}》`)) {
+      case status.onBoard: {
+        const boardMark = `《${this.board.toLowerCase()}》`
+        this.onBoardScreenBuf += chunk
+        if (this.onBoardScreenBuf.length > 24000) {
+          this.onBoardScreenBuf = this.onBoardScreenBuf.slice(-24000)
+        }
+        if (this.onBoardScreenBuf.toLowerCase().includes(boardMark)) {
           console.log('\n[Auto] On board, search/starting post...')
+          this.onBoardScreenBuf = ''
           const isNewPost = !this.aid // 檢查是否為新文章 (不是回文)
           if (isNewPost) {
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
-            this.send(`#`, _ => this.currentState = status.searchArticle)
+            this.send(`#`, _ => {
+              this.currentState = status.searchArticle
+              this.onBoardScreenBuf = ''
+            })
           }
         }
         break
+      }
       case status.searchArticle:
         if(chunk.includes(keywordMap.searchArticle)) {
           console.log('\n[Auto] On board, searching article...')
@@ -563,7 +582,7 @@ class Poster {
 
             this.handleResolve({ text: this.postContent, link })
 
-            return // 暫停執行 跳過最後的this.isProcessing = false
+            return // 暫停；isProcessing 在 handleResolve 已清除
           }
         } else {
           console.log('-> Reading...')
@@ -578,6 +597,10 @@ class Poster {
           )
           return
         }
+        break
+
+      case status.pause:
+        // 等 index.js 呼叫 continueState()，此間仍接收封包但不推進狀態
         break
 
       case status.respPost:
@@ -666,8 +689,8 @@ class Poster {
       isNeedBackup,
     } = options 
 
-    // 注入參數
-    this.board = board
+    // 注入參數（HTTP JSON 常帶入尾端空白；比對《看板》須精確）
+    this.board = board != null ? String(board).trim() : null
     this.title = title
     this.aid = aid
     this.draft = draft

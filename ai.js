@@ -1,4 +1,5 @@
-require('dotenv').config()
+const path = require('path')
+require('dotenv').config({ path: path.join(__dirname, '.env') })
 // const OpenAI = require('openai')
 const { GoogleGenerativeAI } = require('@google/generative-ai')
 // const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
