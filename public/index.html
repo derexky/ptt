@@ -135,6 +135,44 @@
         color: #6b7280;
         margin-top: 2px;
       }
+
+      #progressArea {
+        margin-top: 16px;
+        padding: 14px;
+        border-radius: 8px;
+        background: #f0fdf4;
+        border: 1px solid #bbf7d0;
+        font-size: 14px;
+        display: none;
+      }
+      #progressArea.active {
+        display: block;
+      }
+      #progressArea .progress-meta {
+        color: #166534;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      #progressArea .progress-bar-wrap {
+        height: 8px;
+        background: #dcfce7;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-top: 8px;
+      }
+      #progressArea .progress-bar {
+        height: 100%;
+        width: 0%;
+        background: #16a34a;
+        transition: width 0.25s ease;
+      }
+      #progressArea.error-panel {
+        background: #fef2f2;
+        border-color: #fecaca;
+      }
+      #progressArea.error-panel .progress-meta {
+        color: #991b1b;
+      }
     </style>
   </head>
   <body>
@@ -261,9 +299,144 @@
       </form>
 
       <div id="responseArea"></div>
+      <div id="progressArea" aria-live="polite">
+        <div class="progress-meta" id="progressTitle">發文進度</div>
+        <div id="progressDetail"></div>
+        <div class="progress-bar-wrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+      </div>
     </div>
 
+    <!-- 進度訂閱：設定見 public/firebase-config.js；Rules 見 firestore.rules -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+    <script src="/firebase-config.js"></script>
+
     <script>
+      const FIREBASE_CONFIG = window.__FIREBASE_CONFIG__ || {}
+
+      const firebaseReady =
+        typeof firebase !== 'undefined' &&
+        FIREBASE_CONFIG.projectId &&
+        FIREBASE_CONFIG.apiKey &&
+        FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY' &&
+        FIREBASE_CONFIG.appId &&
+        FIREBASE_CONFIG.appId !== 'YOUR_APP_ID' &&
+        FIREBASE_CONFIG.messagingSenderId &&
+        FIREBASE_CONFIG.messagingSenderId !== 'YOUR_MESSAGING_SENDER_ID'
+
+      let progressUnsub = null
+
+      function stopProgressWatch() {
+        if (typeof progressUnsub === 'function') {
+          progressUnsub()
+          progressUnsub = null
+        }
+      }
+
+      function formatProgressDoc(d) {
+        if (!d) return ''
+        const pct =
+          typeof d.percent === 'number' && !Number.isNaN(d.percent)
+            ? `${d.percent}%`
+            : '—'
+        const lines = [
+          `狀態: ${d.status ?? '—'}`,
+          `階段: ${d.phase ?? '—'}`,
+          `進度: ${pct}`,
+        ]
+        if (d.progressType != null) {
+          lines.push(
+            `細項: ${d.progressType} ${d.progressCurrent ?? ''}/${d.progressTotal ?? ''}`
+          )
+        }
+        if (d.message) lines.push(`說明: ${d.message}`)
+        if (d.error) lines.push(`錯誤: ${d.error}`)
+        if (d.replyUrl) lines.push(`文章網址: ${d.replyUrl}`)
+        return lines.join('\n')
+      }
+
+      /** 訂閱 postJobs/{jobId}，與後端 functions/index.js 寫入的路徑一致 */
+      function startProgressWatch(jobId) {
+        stopProgressWatch()
+        const panel = document.getElementById('progressArea')
+        const titleEl = document.getElementById('progressTitle')
+        const detailEl = document.getElementById('progressDetail')
+        const barEl = document.getElementById('progressBar')
+
+        if (!jobId) {
+          panel.classList.remove('active', 'error-panel')
+          return
+        }
+
+        if (!firebaseReady) {
+          panel.classList.add('active')
+          panel.classList.remove('error-panel')
+          titleEl.textContent = '即時進度（未啟用）'
+          detailEl.textContent =
+            '請編輯 public/firebase-config.js（取代 YOUR_* 占位字），並執行 firebase deploy --only firestore:rules。\njobId: ' +
+            jobId
+          barEl.style.width = '0%'
+          return
+        }
+
+        panel.classList.add('active')
+        panel.classList.remove('error-panel')
+        titleEl.textContent = '發文進度（即時）'
+        detailEl.textContent = '連線 Firestore…\njobId: ' + jobId
+        barEl.style.width = '0%'
+
+        try {
+          if (!firebase.apps.length) {
+            firebase.initializeApp(FIREBASE_CONFIG)
+          }
+          const db = firebase.firestore()
+          const ref = db.collection('postJobs').doc(jobId)
+
+          progressUnsub = ref.onSnapshot(
+            (snap) => {
+              if (!snap.exists) {
+                detailEl.textContent =
+                  '等待後端建立 job 文件…\njobId: ' + jobId
+                return
+              }
+              const d = snap.data()
+              detailEl.textContent = formatProgressDoc(d)
+              const p =
+                typeof d.percent === 'number' && !Number.isNaN(d.percent)
+                  ? Math.max(0, Math.min(100, d.percent))
+                  : 0
+              barEl.style.width = p + '%'
+
+              if (d.status === 'failed') {
+                panel.classList.add('error-panel')
+                titleEl.textContent = '發文失敗'
+              } else if (d.status === 'done' || d.phase === 'completed') {
+                panel.classList.remove('error-panel')
+                titleEl.textContent = '發文完成'
+              } else {
+                panel.classList.remove('error-panel')
+                titleEl.textContent = '發文進行中'
+              }
+            },
+            (err) => {
+              panel.classList.add('active', 'error-panel')
+              titleEl.textContent = '無法訂閱進度'
+              detailEl.textContent =
+                err.message +
+                '\n\n請確認已執行 firebase deploy --only firestore:rules，且規則允許讀取 postJobs；firebase-config.js 須與後端同一專案。'
+              barEl.style.width = '0%'
+            }
+          )
+        } catch (err) {
+          panel.classList.add('active', 'error-panel')
+          titleEl.textContent = '無法訂閱進度'
+          detailEl.textContent = (err && err.message) || String(err)
+          barEl.style.width = '0%'
+        }
+      }
+
       // 定義 API 對照表
       const API_URLS = {
         asia: '/api/asia', // 替換為簡單的代理路徑
@@ -328,7 +501,8 @@
               subject: isNewPost
                 ? document.getElementById('subject').value
                 : null,
-              category: Number(document.getElementById('category')).value || 1,
+              category:
+                Number(document.getElementById('category').value) || 1,
               draft: isNewPost ? document.getElementById('draft').value : null,
               reply: !isNewPost
                 ? document.getElementById('replyId').value
@@ -349,6 +523,8 @@
           responseArea.style.display = 'block'
           responseArea.textContent = '正在呼叫 API...\nURL: ' + apiUrl
           responseArea.className = ''
+          stopProgressWatch()
+          document.getElementById('progressArea').classList.remove('active')
 
           try {
             const res = await fetch(apiUrl, {
@@ -371,11 +547,18 @@
             if (!res.ok) {
               const errorMsg =
                 typeof data === 'object' && data.error ? data.error : data
+              if (typeof data === 'object' && data.jobId) {
+                startProgressWatch(data.jobId)
+              }
               throw new Error(errorMsg || `HTTP error! status: ${res.status}`)
             }
 
             responseArea.textContent =
               '✅ 成功:\n' + JSON.stringify(data, null, 2)
+
+            if (typeof data === 'object' && data.jobId) {
+              startProgressWatch(data.jobId)
+            }
           } catch (error) {
             responseArea.className = 'error'
             responseArea.textContent = '❌ 發生錯誤:\n' + error.message

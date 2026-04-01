@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "Tools for ptt",
   "scripts": {
+    "setup:firebase-config": "node -e \"const fs=require('fs'),p='public/firebase-config.js',s='public/firebase-config.sample.js';if(fs.existsSync(p)){console.log(p+' 已存在');process.exit(0);}fs.copyFileSync(s,p);console.log('已建立 '+p+'，請填入 Console 的 Web 設定');\"",
+    "predeploy": "node scripts/ensure-firebase-config.js",
     "test": "cross-env NODE_ENV=develop node runPost.js",
     "deploy": "cross-env NODE_ENV=prodcution firebase deploy --only hosting",
     "mcp": "node mcp-server.js"

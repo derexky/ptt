@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// 進度文件僅由 Admin SDK（Cloud Functions）寫入。
+// 允許任何人讀 postJobs：需知道 UUID jobId 才能讀到單一文件（非列舉整個集合）。
+// 若需更嚴格：改為 request.auth != null，並在 Console 啟用 Authentication（開始使用）+ 匿名或其他登入。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /postJobs/{jobId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

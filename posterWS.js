@@ -107,6 +107,75 @@ class Poster {
     this.isNeedBackup = false
     /** WSS 在雲端常把一屏切成多個 frame，單包可能不含完整《看板》字樣 */
     this.onBoardScreenBuf = ''
+
+    /** 可選：發文進度回呼（例如寫入 Firestore） */
+    this._onProgress = null
+    this.jobId = null
+    /** 可選，僅供呼叫端識別（例如 Firestore DocumentReference） */
+    this.jobRef = null
+    this._progressThrottleMs = 3000
+    this._progressMinPercentDelta = 5
+    this._lastProgressAt = 0
+    this._lastReportedPercent = -1
+    this._postReject = null
+    this._jobFailed = false
+    this._completedOk = false
+  }
+
+  /**
+   * @param {object} payload
+   * @param {{ immediate?: boolean }} [opts]
+   */
+  emitProgress = async (payload, opts = {}) => {
+    if (!this._onProgress) return
+    const { immediate = false } = opts
+    const full = { ...payload, jobId: this.jobId ?? undefined }
+
+    if (!immediate && payload.percent != null) {
+      const now = Date.now()
+      const delta = Math.abs(payload.percent - this._lastReportedPercent)
+      const below100 = payload.percent < 100
+      if (
+        below100 &&
+        now - this._lastProgressAt < this._progressThrottleMs &&
+        delta < this._progressMinPercentDelta
+      ) {
+        return
+      }
+      this._lastProgressAt = now
+      this._lastReportedPercent = payload.percent
+    } else if (immediate && payload.percent != null) {
+      this._lastReportedPercent = payload.percent
+      this._lastProgressAt = Date.now()
+    }
+
+    await this._onProgress(full)
+  }
+
+  /** 非阻塞；避免 Firestore 延遲卡住 PTT 狀態機 */
+  reportProgress = (payload, opts) => {
+    void this.emitProgress(payload, opts).catch((e) =>
+      console.error('[Poster] onProgress error:', e.message)
+    )
+  }
+
+  failJob = async (err) => {
+    if (this._jobFailed) return
+    this._jobFailed = true
+    const message = err?.message || String(err)
+    try {
+      await this.emitProgress(
+        { status: 'failed', phase: 'failed', error: message },
+        { immediate: true }
+      )
+    } catch (e) {
+      console.error('[Poster] failJob emitProgress:', e.message)
+    }
+    if (this._postReject) {
+      try {
+        this._postReject(err instanceof Error ? err : new Error(message))
+      } catch (_) {}
+    }
   }
 
   send = (text, callback) => {
@@ -118,6 +187,10 @@ class Poster {
   continueState = () => {
     if (this.stream) {
       console.log('\n[Auto] Resuming PTT process...')
+      this.reportProgress(
+        { status: 'running', phase: 'resumed', message: 'Client resumed after content_ready' },
+        { immediate: true }
+      )
       const isNewPost = !this.aid
       this.currentState = isNewPost ? status.newPost : status.respPost
       this.isProcessing = false
@@ -147,6 +220,10 @@ class Poster {
    * PTT 發文流程結束
    */
   finishPost = async () => {
+    this.reportProgress(
+      { status: 'posting', phase: 'saving', message: 'Sending save (Ctrl+X / S)' },
+      { immediate: true }
+    )
     // 發送完畢後，結束編輯：Ctrl + X (\x18)
     this.currentState = status.postDone
     await this.delayWrite(keywordMap.input_ctl_x)
@@ -170,6 +247,19 @@ class Poster {
     } else {
       console.log(`[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
     }
+
+    const immediate = current === total || progress >= 100
+    this.reportProgress(
+      {
+        status: 'posting',
+        phase: 'posting',
+        percent: progress,
+        type,
+        current,
+        total,
+      },
+      { immediate }
+    )
   }
 
   /**
@@ -353,6 +443,14 @@ class Poster {
     this.currentState = status.pause
 
     if (!text || !text.length) {
+      this.reportProgress(
+        {
+          status: 'failed',
+          phase: 'failed',
+          error: 'Content is empty.',
+        },
+        { immediate: true }
+      )
       this.stream.close()
       this.isProcessing = false
       this.finalResolve({
@@ -363,6 +461,16 @@ class Poster {
     }
 
     if (this._contentReadyResolve) {
+      this.reportProgress(
+        {
+          status: 'content_ready',
+          phase: 'content_ready',
+          percent: 0,
+          message: 'Content ready; awaiting continueState / post',
+          replyUrl: link,
+        },
+        { immediate: true }
+      )
       this._contentReadyResolve({
         message: 'Content ready, proceeding to post.',
         content: text,
@@ -453,6 +561,7 @@ class Poster {
       case status.init:
         if (chunk.includes(keywordMap.account)) {
           console.log('\n[Auto] Sending ID...')
+          this.reportProgress({ status: 'running', phase: 'sent_id' }, { immediate: true })
 
           this.send(
             this.id + keywordMap.input_enter,
@@ -464,6 +573,7 @@ class Poster {
       case status.login:
         if (chunk.includes(keywordMap.password)) {
           console.log('\n[Auto] Sending password...')
+          this.reportProgress({ status: 'running', phase: 'sent_password' }, { immediate: true })
 
           this.send(
             this.password + keywordMap.input_enter,
@@ -475,6 +585,7 @@ class Poster {
       case status.mainMenu:
         if (chunk.includes(keywordMap.mainMenu)) {
           console.log('\n[Auto] At main menu, entering board search...')
+          this.reportProgress({ status: 'running', phase: 'main_menu' }, { immediate: true })
 
           this.send(
             keywordMap.input_search,
@@ -486,6 +597,7 @@ class Poster {
       case status.searchBoard:
         if (chunk.includes(keywordMap.searchBoard)) {
           console.log('\n[Auto] Searching board...')
+          this.reportProgress({ status: 'running', phase: 'searching_board' }, { immediate: true })
 
           this.send(
             this.board + keywordMap.input_enter,
@@ -507,7 +619,9 @@ class Poster {
           console.log('\n[Auto] On board, search/starting post...')
           this.onBoardScreenBuf = ''
           const isNewPost = !this.aid // 檢查是否為新文章 (不是回文)
+          this.reportProgress({ status: 'running', phase: 'on_board' }, { immediate: true })
           if (isNewPost) {
+            this.reportProgress({ status: 'running', phase: 'ai_generating' }, { immediate: true })
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
@@ -522,6 +636,7 @@ class Poster {
       case status.searchArticle:
         if(chunk.includes(keywordMap.searchArticle)) {
           console.log('\n[Auto] On board, searching article...')
+          this.reportProgress({ status: 'running', phase: 'searching_article' }, { immediate: true })
 
           this.send(
             `${this.aid}`+ keywordMap.input_enter,
@@ -533,6 +648,7 @@ class Poster {
         match = chunk.match(/\s*(\x08*)?[●>]?\s*\d+\s*/)
         if (match) {
           console.log('\n[Auto] At title, entering article...')
+          this.reportProgress({ status: 'running', phase: 'reading_article' }, { immediate: true })
           
           this.send(
             keywordMap.input_right,
@@ -575,6 +691,10 @@ class Poster {
             if (backupContent) {
               this.postContent = backupContent
             } else {
+              this.reportProgress(
+                { status: 'running', phase: 'ai_generating_reply' },
+                { immediate: true }
+              )
               this.postContent = await this.getAiText(article.content)
 
               if (this.isNeedBackup) writeFile(this.postContent, backupPath)
@@ -635,10 +755,14 @@ class Poster {
           )
 
           this.currentState = status.posting
+          this.reportProgress(
+            { status: 'posting', phase: 'posting', percent: 0, message: 'Started sending body' },
+            { immediate: true }
+          )
           if (this.isSendByWord) {
-            this.postEachWord()
+            void this.postEachWord().catch((e) => void this.failJob(e))
           } else {
-            this.postEachLine()
+            void this.postEachLine().catch((e) => void this.failJob(e))
           }
         } else {
           console.log('\n[Auto] Content is empty, skipping post.')
@@ -649,6 +773,20 @@ class Poster {
 
       case status.postDone:
         console.log('\n[Auto] Post done.')
+        this._completedOk = true
+        try {
+          await this.emitProgress(
+            {
+              status: 'done',
+              phase: 'post_done',
+              percent: 100,
+              message: 'Article posted successfully.',
+            },
+            { immediate: true }
+          )
+        } catch (e) {
+          console.error('[Poster] emitProgress post_done:', e.message)
+        }
         this.stream.close()
         this.currentState = status.end
         this.finalResolve({
@@ -687,7 +825,31 @@ class Poster {
       category,
       isSendByWord,
       isNeedBackup,
-    } = options 
+      onProgress,
+      jobRef,
+      jobId: jobIdOpt,
+      progressThrottleMs,
+      progressMinPercentDelta,
+    } = options
+
+    this._onProgress = typeof onProgress === 'function' ? onProgress : null
+    this.jobRef = jobRef != null ? jobRef : null
+    this.jobId =
+      jobIdOpt != null
+        ? String(jobIdOpt)
+        : this.jobRef && typeof this.jobRef.id === 'string'
+          ? this.jobRef.id
+          : null
+    this._progressThrottleMs =
+      typeof progressThrottleMs === 'number' ? progressThrottleMs : 3000
+    this._progressMinPercentDelta =
+      typeof progressMinPercentDelta === 'number'
+        ? progressMinPercentDelta
+        : 5
+    this._lastProgressAt = 0
+    this._lastReportedPercent = -1
+    this._jobFailed = false
+    this._completedOk = false
 
     // 注入參數（HTTP JSON 常帶入尾端空白；比對《看板》須精確）
     this.board = board != null ? String(board).trim() : null
@@ -702,6 +864,10 @@ class Poster {
     this.isNeedBackup = !!isNeedBackup
 
     return new Promise((resolve, reject) => {
+      this._postReject = reject
+      this.finalResolve = resolve
+      this.finalReject = reject
+
       this.stream = new w3cwebsocket(
         'wss://ws.ptt.cc/bbs',  // 參數 1: PTT WebSocket 網址
         'bbs',                  // 參數 2: Protocol (通訊協定，設為 'bbs' 或 undefined)
@@ -714,24 +880,28 @@ class Poster {
 
       this.stream.onopen = () => {
         console.log('WSS 連線成功！現在連到 PTT')
+        this.reportProgress({ status: 'running', phase: 'wss_open' }, { immediate: true })
 
         // 重要：把所有從伺服器來的資料餵給你的狀態機
-        this.stream.onmessage = (msg) => {
-          const buffer = Buffer.from(msg.data)
-          const chunk = iconv.decode(buffer, 'big5')
-        
-          this.handleState(chunk, resolve, reject)
-        }
-      }
-      this.stream.onerror = (e) => reject(e)
-      this.stream.onclose = () => {
-        if (this.currentState !== status.postDone) {
-          reject(new Error('WSS 斷線'))
-        }
-      }
+        this.stream.onmessage = async (msg) => {
+          try {
+            const buffer = Buffer.from(msg.data)
+            const chunk = iconv.decode(buffer, 'big5')
 
-      this.finalResolve = resolve
-      this.finalReject = reject
+            await this.handleState(chunk, resolve, reject)
+          } catch (err) {
+            await this.failJob(err)
+          }
+        }
+      }
+      this.stream.onerror = () => {
+        void this.failJob(new Error('WSS error'))
+      }
+      this.stream.onclose = () => {
+        if (!this._completedOk && !this._jobFailed) {
+          void this.failJob(new Error('WSS 斷線'))
+        }
+      }
     }) 
   }
 }

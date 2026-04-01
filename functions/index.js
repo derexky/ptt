@@ -6,16 +6,44 @@
  *
  * See a full list of supported triggers at https://firebase.google.com/docs/functions
  */
+const crypto = require('crypto')
+const admin = require('firebase-admin')
+const { FieldValue } = require('firebase-admin/firestore')
 const { Poster } = require('./external/posterWS')
 const { logger } = require('firebase-functions')
 const { onRequest } = require('firebase-functions/v2/https')
 
+if (!admin.apps.length) {
+  admin.initializeApp()
+}
+
+const db = admin.firestore()
+
+/** @param {Record<string, unknown>} ev */
+function buildProgressPatch(ev) {
+  const patch = {
+    updatedAt: FieldValue.serverTimestamp(),
+  }
+  if (ev.status != null) patch.status = ev.status
+  if (ev.phase != null) patch.phase = ev.phase
+  if (ev.percent != null) patch.percent = ev.percent
+  if (ev.type != null) patch.progressType = ev.type
+  if (ev.current != null) patch.progressCurrent = ev.current
+  if (ev.total != null) patch.progressTotal = ev.total
+  if (ev.error != null) patch.error = String(ev.error)
+  if (ev.message != null) patch.message = String(ev.message)
+  if (ev.replyUrl != null) patch.replyUrl = String(ev.replyUrl)
+  if (ev.jobId != null) patch.jobId = String(ev.jobId)
+  return patch
+}
+
 // Create and deploy your first functions
 // https://firebase.google.com/docs/functions/get-started
 
-async function runPost(config) {
+async function runPost(config, progressCtx = {}) {
   // 從 config 中解構 (Destructure) 參數
   const { id, password, args, isNewPost } = config
+  const { jobId, jobRef, onProgress } = progressCtx
 
   // 檢查關鍵參數是否存在
   if (!id || !password || !args || !args.board) {
@@ -23,22 +51,20 @@ async function runPost(config) {
   }
 
   const controller = new Poster(id, password)
-  const finalPostPromise = controller
-    .postArticle({
-      board: args.board,
-      title: isNewPost ? args.subject : null,
-      category: Number(args.category) || 1,
-      aid: isNewPost ? null : args.reply.replace(/^#/, ''),
-      stance: args.stance,
-      target: isNewPost ? null : args.target,
-      isSendByWord: args.isSendByWord,
-      draft: isNewPost ? args.draft : null,
-      isNeedBackup: false,
-    })
-    .catch((err) => {
-      // 捕獲並記錄背景發文的最終錯誤
-      logger.error(`Background posting failed:`, err.message)
-    })
+  const finalPostPromise = controller.postArticle({
+    board: args.board,
+    title: isNewPost ? args.subject : null,
+    category: Number(args.category) || 1,
+    aid: isNewPost ? null : args.reply.replace(/^#/, ''),
+    stance: args.stance,
+    target: isNewPost ? null : args.target,
+    isSendByWord: args.isSendByWord,
+    draft: isNewPost ? args.draft : null,
+    isNeedBackup: false,
+    jobId,
+    jobRef,
+    onProgress,
+  })
 
   try {
     // 根據 isNewPost 判斷是發新文章還是回覆
@@ -77,10 +103,34 @@ const createStreamHandler = async (request, response) => {
   }
   // 2. 獲取 HTTP 請求 Body 中的 JSON 數據
   const body = request.body
-  logger.info('Received request body:', body)
+  logger.info('post request', {
+    isNewPost: body.isNewPost === true,
+    board: body.args?.board,
+    hasCredentials: !!(body.id && body.password),
+  })
+
+  const jobId = crypto.randomUUID()
+  const jobRef = db.collection('postJobs').doc(jobId)
 
   // 3. 呼叫核心邏輯並處理結果
   try {
+    await jobRef.set({
+      jobId,
+      status: 'running',
+      phase: 'queued',
+      percent: 0,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+
+    const onProgress = async (ev) => {
+      try {
+        await jobRef.set(buildProgressPatch(ev), { merge: true })
+      } catch (e) {
+        logger.error('postJobs progress write failed:', e.message)
+      }
+    }
+
     const postConfig = {
       id: body.id,
       password: body.password,
@@ -89,11 +139,13 @@ const createStreamHandler = async (request, response) => {
       isSendByWord: body.isSendByWord === true, // 確保為布林值
     }
 
-    const result = await runPost(postConfig)
+    const progressCtx = { jobId, jobRef, onProgress }
+    const result = await runPost(postConfig, progressCtx)
     const { aiContent, reply, message, controller, finalPostPromise } = result
 
     response.status(200).json({
       success: true,
+      jobId,
       message,
       aiContent,
       reply,
@@ -102,17 +154,50 @@ const createStreamHandler = async (request, response) => {
     if (controller) {
       console.log(`\n[Auto] Resuming task in background.`)
       controller.continueState()
-      await finalPostPromise.finally(() => {
-        console.log(
-          `\n[Auto] Background task finished and cleared from activeTasks.`
+      try {
+        await finalPostPromise
+        await jobRef.set(
+          buildProgressPatch({
+            status: 'done',
+            phase: 'completed',
+            percent: 100,
+            message: 'finalPostPromise settled',
+          }),
+          { merge: true }
         )
-      })
+      } catch (err) {
+        await jobRef.set(
+          buildProgressPatch({
+            status: 'failed',
+            phase: 'failed',
+            error: err?.message || String(err),
+          }),
+          { merge: true }
+        )
+        logger.error('Background posting failed:', err?.message || err)
+      }
+      console.log(
+        `\n[Auto] Background task finished and cleared from activeTasks.`
+      )
     }
   } catch (error) {
+    try {
+      await jobRef.set(
+        buildProgressPatch({
+          status: 'failed',
+          phase: 'failed',
+          error: error.message || String(error),
+        }),
+        { merge: true }
+      )
+    } catch (e) {
+      logger.error('postJobs failed patch error:', e.message)
+    }
     // 失敗：返回 500 Internal Server Error
     logger.error('Function execution error:', error.message)
     response.status(500).json({
       success: false,
+      jobId,
       error: error.message || 'An unknown error occurred during posting.',
     })
   }

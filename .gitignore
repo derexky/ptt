@@ -1,5 +1,7 @@
 # 忽略本地 Firebase 設定檔，用於儲存敏感 URL
 hosting_secrets.json
+# 前端 Firebase Web 設定（含 apiKey），請由 firebase-config.sample.js 複製建立
+public/firebase-config.js
 
 external/
 # Logs
