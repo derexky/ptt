@@ -5,6 +5,7 @@ const config = require('./config')
 const { crawlNewPosts } = require('./crawl')
 const { Poster } = require('./posterWS')
 const { keywordFilter, aiFilter } = require('./filter')
+const { extractAid } = require('./helper')
 
 // ── DB ──────────────────────────────────────────────────────────────
 
@@ -34,14 +35,31 @@ async function initSchema(conn) {
   `)
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS reply_log (
-      id           INT AUTO_INCREMENT PRIMARY KEY,
-      bot_id       INT NOT NULL,
-      article_link VARCHAR(255) NOT NULL,
-      replied_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      id            INT AUTO_INCREMENT PRIMARY KEY,
+      bot_id        INT NOT NULL,
+      article_link  VARCHAR(255) NOT NULL,
+      board         VARCHAR(50),
+      article_title VARCHAR(500),
+      topic_id      INT,
+      success       BOOLEAN DEFAULT TRUE,
+      ai_content    TEXT,
+      replied_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY unique_reply (bot_id, article_link),
       FOREIGN KEY (bot_id) REFERENCES bots(id)
     )
   `)
+  const [existingCols] = await conn.execute('SHOW COLUMNS FROM reply_log')
+  const colSet = new Set(existingCols.map(c => c.Field))
+  const migrations = [
+    ['board',         'ALTER TABLE reply_log ADD COLUMN board VARCHAR(50)'],
+    ['article_title', 'ALTER TABLE reply_log ADD COLUMN article_title VARCHAR(500)'],
+    ['topic_id',      'ALTER TABLE reply_log ADD COLUMN topic_id INT'],
+    ['success',       'ALTER TABLE reply_log ADD COLUMN success BOOLEAN DEFAULT TRUE'],
+    ['ai_content',    'ALTER TABLE reply_log ADD COLUMN ai_content TEXT'],
+  ]
+  for (const [col, sql] of migrations) {
+    if (!colSet.has(col)) await conn.execute(sql)
+  }
   console.log('✅ Schema initialised')
 }
 
@@ -63,11 +81,50 @@ async function hasReplied(conn, botId, articleLink) {
   return rows.length > 0
 }
 
-async function logReply(conn, botId, articleLink) {
-  await conn.execute(
-    'INSERT IGNORE INTO reply_log (bot_id, article_link) VALUES (?, ?)',
-    [botId, articleLink]
+async function hasDuplicateContent(conn, botId, content) {
+  if (!content) return false
+  const [rows] = await conn.execute(
+    'SELECT id FROM reply_log WHERE bot_id = ? AND ai_content = ? AND success = TRUE LIMIT 1',
+    [botId, content]
   )
+  return rows.length > 0
+}
+
+async function logReply(conn, botId, articleLink, { board, articleTitle, topicId, success, aiContent } = {}) {
+  await conn.execute(
+    `INSERT IGNORE INTO reply_log (bot_id, article_link, board, article_title, topic_id, success, ai_content)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [botId, articleLink, board ?? null, articleTitle ?? null, topicId ?? null, success ?? true, aiContent ?? null]
+  )
+}
+
+async function getFailedReplies(conn, botId, board) {
+  const [rows] = await conn.execute(
+    `SELECT article_link, article_title FROM reply_log
+     WHERE bot_id = ? AND board = ? AND success = FALSE
+     ORDER BY replied_at DESC`,
+    [botId, board]
+  )
+  return rows
+}
+
+async function updateReplyLog(conn, botId, articleLink, { success, aiContent }) {
+  await conn.execute(
+    `UPDATE reply_log SET success = ?, ai_content = ?, replied_at = NOW()
+     WHERE bot_id = ? AND article_link = ?`,
+    [success ?? false, aiContent ?? null, botId, articleLink]
+  )
+}
+
+const DAILY_BOARD_LIMIT = 5
+
+async function countTodayBoardReplies(conn, botId, board) {
+  const [rows] = await conn.execute(
+    `SELECT COUNT(DISTINCT article_link) AS cnt FROM reply_log
+     WHERE bot_id = ? AND article_link LIKE ? AND DATE(replied_at) = CURDATE()`,
+    [botId, `%/bbs/${board}/%`]
+  )
+  return rows[0].cnt
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -76,9 +133,25 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function getBaseTitle(title) {
+  return (title || '').replace(/^(Re:\s*)+/i, '').trim()
+}
+
+async function hasRepliedToSameThread(conn, botId, board, baseTitle) {
+  const [rows] = await conn.execute(
+    `SELECT rl.id FROM reply_log rl
+     JOIN articles a ON rl.article_link = a.link
+     WHERE rl.bot_id = ? AND rl.board = ?
+       AND (a.title = ? OR a.title = ?)
+     LIMIT 1`,
+    [botId, board, baseTitle, `Re: ${baseTitle}`]
+  )
+  return rows.length > 0
+}
+
 // ai.js enforces 2-min min interval; track last call time ourselves
 // so we can sleep before each AI-calling step.
-const AI_MIN_INTERVAL = 130000 // 2 min 10 sec — slightly over the 120 s limit
+const AI_MIN_INTERVAL = 12000 // 12 sec — slightly over the 10 s limit in ai.js
 let lastAiCallAt = 0
 
 async function waitForAiRateLimit() {
@@ -94,43 +167,50 @@ function markAiCall() {
   lastAiCallAt = Date.now()
 }
 
-function extractAid(link) {
-  const match = link.match(/\/([^/]+)\.html$/)
-  return match ? match[1] : null
-}
 
 // ── Reply ────────────────────────────────────────────────────────────
 
-async function replyWithBot(bot, article, board) {
-  const aid = extractAid(article.link)
-  if (!aid) {
-    console.error(`[Bot ${bot.ptt_id}] Cannot extract aid from: ${article.link}`)
-    return false
+async function replyWithBot(bot, article, { preGeneratedContent, onContentReady } = {}) {
+  const aid = article.aid || extractAid(article.link)
+  const board = article.board
+  if (!aid || !board) {
+    console.error(`[Bot ${bot.ptt_id}] Missing aid or board for: ${article.link}`)
+    return { ok: false, aiContent: null }
   }
 
-  const stance = [bot.stance, bot.tone].filter(Boolean).join('\n')
+  const stance = [bot.stance, bot.tone, '回覆內容至少500字'].filter(Boolean).join('\n')
   const poster = new Poster(bot.ptt_id, bot.password)
 
-  poster.postArticle({
+  const postPromise = poster.postArticle({
     board,
     aid,
     stance,
     isSendByWord: true,
     isNeedBackup: false,
-  }).catch(err => console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message))
+    preGeneratedContent: preGeneratedContent || null,
+  }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
 
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Reply timeout after 5 minutes')), 300000)
+    setTimeout(() => reject(new Error('Reply timeout after 15 minutes')), 900000)
   )
 
   try {
     const result = await Promise.race([poster.contentReady, timeout])
-    console.log(`[Bot ${bot.ptt_id}] Content ready: "${String(result.content || result.text || '').slice(0, 60)}..."`)
+    const aiContent = String(result.content || result.text || '')
+    console.log(`[Bot ${bot.ptt_id}] Content ready: "${aiContent.slice(0, 60)}..."`)
+    if (onContentReady) {
+      const shouldPost = await onContentReady(aiContent)
+      if (shouldPost === false) {
+        poster.abort()
+        return { ok: false, aiContent, skipped: true }
+      }
+    }
     poster.continueState()
-    return true
+    await Promise.race([postPromise, timeout])
+    return { ok: true, aiContent }
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
-    return false
+    return { ok: false, aiContent: null }
   } finally {
     markAiCall()
   }
@@ -162,49 +242,133 @@ async function runWorkflow() {
       console.log(`\n📋 Topic: board=${topic.board} keywords=${JSON.stringify(topic.keywords)}`)
 
       try {
-        // Step 1: Crawl latest articles into DB
-        console.log(`Crawling ${topic.board}...`)
-        await crawlNewPosts(10, topic.board)
+        // Check each bot for pending failed replies on this board
+        const botFailedMap = new Map()
+        for (const bot of bots) {
+          const failed = await getFailedReplies(conn, bot.id, topic.board)
+          if (failed.length > 0) botFailedMap.set(bot.id, failed)
+        }
 
-        // Step 2: Query the DB for articles from this board
-        const [articles] = await conn.execute(
-          `SELECT id, title, link FROM articles
-            WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
-          [`%/bbs/${topic.board}/%`]
-        )
-        console.log(`DB returned ${articles.length} articles for ${topic.board}`)
+        const botsNeedingNew = bots.filter(b => !botFailedMap.has(b.id))
+        let sortedArticles = []
 
-        // Step 3: Keyword pre-filter
-        const keyFiltered = keywordFilter(articles, topic.keywords)
-        console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
-        if (keyFiltered.length === 0) continue
+        if (botsNeedingNew.length > 0) {
+          // Step 1: Crawl latest articles into DB
+          console.log(`Crawling ${topic.board}...`)
+          await crawlNewPosts(5, topic.board, { skipContent: true })
 
-        // Step 4: AI filter (1 AI call per topic)
-        await waitForAiRateLimit()
-        console.log(`Running AI filter on ${keyFiltered.length} article(s)...`)
-        const selected = await aiFilter(keyFiltered, topic.ai_prompt)
-        markAiCall()
-        console.log(`AI selected ${selected.length} article(s)`)
-        if (selected.length === 0) continue
+          // Step 2: Query the DB for articles from this board
+          const [articles] = await conn.execute(
+            `SELECT id, title, link, aid, board FROM articles
+              WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
+            [`%/bbs/${topic.board}/%`]
+          )
+          console.log(`DB returned ${articles.length} articles for ${topic.board}`)
 
-        // Step 5: Reply loop — each bot × each selected article
-        for (const article of selected) {
-          for (const bot of bots) {
-            const already = await hasReplied(conn, bot.id, article.link)
-            if (already) {
-              console.log(`[Bot ${bot.ppt_id}] Already replied to "${article.title}", skipping`)
+          // Step 3: Keyword pre-filter
+          const keyFiltered = keywordFilter(articles, topic.keywords)
+          console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
+
+          if (keyFiltered.length > 0) {
+            // Step 4: AI filter (1 AI call per topic)
+            await waitForAiRateLimit()
+            console.log(`Running AI filter on ${keyFiltered.length} article(s)...`)
+            const selected = await aiFilter(keyFiltered, topic.ai_prompt)
+            markAiCall()
+            console.log(`AI selected ${selected.length} article(s)`)
+            const parsePush = p => p === '爆' || p === '100+' ? 100 : (parseInt(p) || 0)
+            sortedArticles = [...selected].sort((a, b) => parsePush(b.push) - parsePush(a.push))
+          }
+        } else {
+          console.log(`All bots have pending retries for ${topic.board}, skipping crawl`)
+        }
+
+        const claimedThisRun = new Set()
+
+        for (const bot of bots) {
+          if (botFailedMap.has(bot.id)) {
+            // Retry path: re-post failed replies
+            const failed = botFailedMap.get(bot.id)
+            console.log(`[Bot ${bot.ptt_id}] ${failed.length} failed reply(s) to retry`)
+            for (const failedReply of failed) {
+              const article = {
+                link: failedReply.article_link,
+                title: failedReply.article_title,
+                board: topic.board,
+              }
+              const hasContent = !!failedReply.ai_content
+              console.log(`[Bot ${bot.ptt_id}] Retrying: "${failedReply.article_title}" (${hasContent ? 'reuse content' : 'regenerate'})`)
+              if (!hasContent) await waitForAiRateLimit()
+              const { ok, aiContent, skipped } = await replyWithBot(bot, article, {
+                preGeneratedContent: failedReply.ai_content || null,
+                onContentReady: hasContent ? null : async (content) => {
+                  if (await hasDuplicateContent(conn, bot.id, content)) {
+                    console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content on retry, skipping`)
+                    return false
+                  }
+                  await updateReplyLog(conn, bot.id, failedReply.article_link, { success: false, aiContent: content })
+                },
+              })
+              if (skipped) {
+                console.log(`[Bot ${bot.ptt_id}] ⏭️ Retry skipped (duplicate content)`)
+              } else {
+                await updateReplyLog(conn, bot.id, failedReply.article_link, { success: ok, aiContent: aiContent || failedReply.ai_content })
+                console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Retry succeeded' : '❌ Retry failed'}`)
+              }
+            }
+          } else {
+            // Normal path: pick a new article
+            const todayReplies = await countTodayBoardReplies(conn, bot.id, topic.board)
+            console.log(`[Bot ${bot.ptt_id}] Today's replies for ${topic.board}: ${todayReplies}/${DAILY_BOARD_LIMIT}`)
+
+            if (todayReplies >= DAILY_BOARD_LIMIT) {
+              console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${DAILY_BOARD_LIMIT} 篇，跳過`)
               continue
             }
 
-            console.log(`[Bot ${bot.ppt_id}] Replying to: "${article.title}"`)
+            const target = await (async () => {
+              for (const article of sortedArticles) {
+                if (claimedThisRun.has(article.link)) continue
+                if (await hasReplied(conn, bot.id, article.link)) continue
+                const baseTitle = getBaseTitle(article.title)
+                if (await hasRepliedToSameThread(conn, bot.id, topic.board, baseTitle)) {
+                  console.log(`[Bot ${bot.ptt_id}] ⚠️ Same thread already replied: "${baseTitle}", skipping "${article.title}"`)
+                  continue
+                }
+                return article
+              }
+              return null
+            })()
 
-            // Wait for AI rate limit before the Poster's internal AI call
+            if (!target) {
+              console.log(`[Bot ${bot.ptt_id}] 沒有可回覆的新文章`)
+              continue
+            }
+
+            claimedThisRun.add(target.link)
+            console.log(`[Bot ${bot.ptt_id}] Replying to: "${target.title}" (push: ${target.push})`)
+
             await waitForAiRateLimit()
-
-            const ok = await replyWithBot(bot, article, topic.board)
-            if (ok) {
-              await logReply(conn, bot.id, article.link)
-              console.log(`[Bot ${bot.ppt_id}] ✅ Reply logged`)
+            const { ok, aiContent, skipped } = await replyWithBot(bot, target, {
+              onContentReady: async (content) => {
+                if (await hasDuplicateContent(conn, bot.id, content)) {
+                  console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content detected, skipping post`)
+                  return false
+                }
+                await logReply(conn, bot.id, target.link, {
+                  board: topic.board,
+                  articleTitle: target.title,
+                  topicId: topic.id,
+                  success: false,
+                  aiContent: content,
+                })
+              },
+            })
+            if (skipped) {
+              console.log(`[Bot ${bot.ptt_id}] ⏭️ Skipped (duplicate content)`)
+            } else {
+              await updateReplyLog(conn, bot.id, target.link, { success: ok, aiContent })
+              console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Reply logged' : '❌ Reply failed, logged'}`)
             }
           }
         }
