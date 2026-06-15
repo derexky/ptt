@@ -119,16 +119,20 @@ async function replyWithBot(bot, article, board) {
     isNeedBackup: false,
   }).catch(err => console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message))
 
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Reply timeout after 5 minutes')), 300000)
+  )
+
   try {
-    const result = await poster.contentReady
+    const result = await Promise.race([poster.contentReady, timeout])
     console.log(`[Bot ${bot.ptt_id}] Content ready: "${String(result.text || '').slice(0, 60)}..."`)
     poster.continueState()
-    // The Poster's internal AI call just completed; mark the time.
-    markAiCall()
     return true
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
     return false
+  } finally {
+    markAiCall()
   }
 }
 
