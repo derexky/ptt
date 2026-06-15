@@ -7,34 +7,34 @@
 
 ## 概述
 
-建立一個獨立的 `ptt-workflow` 專案，實現以下自動化流程：
+在現有 `ptt` 專案內新增自動化 workflow，實現以下流程：
 
 **抓取文章列表 → 關鍵字初篩 → AI 選題 → 多帳號自動回文**
 
-此專案作為獨立 Node.js 應用加入工作區，核心邏輯（`posterWS.js`、`ai.js`）從原 `ptt` 專案以相對路徑 require，不複製程式碼。
+直接沿用專案內已有的 `crawl.js`、`ai.js`、`posterWS.js`，新增少量檔案完成串接，共用現有 MySQL 資料庫與 `node_modules`。
 
 ---
 
 ## 架構
 
-### 專案結構
+### 新增檔案
 
 ```
-ptt-workflow/
-├── index.js          # 手動觸發入口（node index.js）
-├── workflow.js       # 主流程協調器
-├── db.js             # MySQL 連線 + 初始化 schema
-├── filter.js         # 關鍵字初篩 + AI 批次篩選
-├── replier.js        # 呼叫 posterWS 回文
-├── scheduler.js      # node-schedule 定時排程入口
-├── package.json
-└── .env              # DB 連線、Gemini API key
+ptt/
+├── workflow.js      # 主流程協調器
+├── scheduler.js     # node-schedule 定時排程入口
+└── filter.js        # 關鍵字初篩 + AI 批次篩選
 ```
 
-### 相依關係
+`workflow.js` 手動執行：`node workflow.js`
+`scheduler.js` 排程執行：`node scheduler.js`
 
-- `ptt-workflow` 直接 require `../ptt/posterWS.js` 和 `../ptt/ai.js`
-- 共用同一個 MySQL 資料庫（同一 DB instance，新增三張表）
+### 相依的現有模組
+
+- `crawl.js`（`crawlNewPosts`）— 用 axios + cheerio 爬 PTT 網頁版文章列表，結果存入 MySQL `articles` 表
+- `posterWS.js` — 透過 WebSocket 連線 PTT 發回文
+- `ai.js`（`generateContentByGoogle`）— 呼叫 Gemini API 生成內容
+- `main.js` 的 MySQL 連線 — 沿用現有初始化邏輯，新增三張表
 
 ---
 
@@ -86,7 +86,7 @@ CREATE TABLE reply_log (
 runWorkflow()
   1. 從 DB 載入所有 is_active=true 的 topics
   2. 從 DB 載入所有 is_active=true 的 bots
-  3. 爬文：對每個 topic 的 board 爬取最新文章列表
+  3. 爬文：對每個 topic 的 board 呼叫 crawlNewPosts() 爬取最新文章
   4. 關鍵字初篩：filter.js 用 topic.keywords 過濾標題
   5. AI 篩選：批次送給 AI（使用 topic.ai_prompt），回傳值得回文的文章清單
   6. 逐帳號回文：
@@ -108,12 +108,12 @@ runWorkflow()
 ### AI 批次篩選
 - 將初篩後的文章標題清單一次送給 AI
 - Prompt 結構：`topic.ai_prompt` + 文章標題清單
-- AI 回傳值得回文的文章索引或連結清單
+- AI 回傳值得回文的文章索引清單
 - 遵守 `ai.js` 現有的 rate limit（兩次呼叫間隔 ≥ 2 分鐘）
 
 ---
 
-## 回文邏輯（replier.js）
+## 回文邏輯
 
 - 對每個 bot 依序（非平行）呼叫 posterWS 回文，避免同時登入衝突
 - AI 生成回文時，system prompt = `bot.stance`，語氣由 `bot.tone` 補充
@@ -125,15 +125,15 @@ runWorkflow()
 
 ### 手動
 ```bash
-node index.js
+node workflow.js
 ```
 
 ### 排程
 ```bash
-node scheduler.js   # 持續執行，依 DB 設定的 cron expression 定時觸發
+node scheduler.js   # 持續執行，定時觸發 runWorkflow()
 ```
 
-排程 cron expression 寫在 `scheduler.js` 中，預設 `0 * * * *`（每小時整點），可透過 `.env` 的 `CRON_SCHEDULE` 覆蓋。
+排程 cron expression 預設 `0 * * * *`（每小時整點），可透過 `.env` 的 `CRON_SCHEDULE` 覆蓋。
 
 ---
 
