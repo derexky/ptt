@@ -2,8 +2,9 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const fs = require("fs");
 const path = require("path");
-const mysql = require("mysql2/promise"); // 新增：MySQL 模組（支援 Promise）
+const mysql = require("mysql2/promise");
 const config = require("./config");
+const { extractAid, extractBoard } = require("./helper");
 
 // 物件定義後生成檔案路徑
 config.statsFileName = path.join(__dirname, `${config.boardName}_stats.json`);
@@ -29,9 +30,15 @@ async function initDatabase() {
             date VARCHAR(20) NOT NULL,
             commentCounts INT NOT NULL DEFAULT 0,
             link VARCHAR(255) NOT NULL UNIQUE,
+            aid VARCHAR(20),
+            board VARCHAR(50),
             INDEX idx_link (link)
         )
     `);
+
+    // migration：既有 table 補欄位
+    await mysqlConnection.execute(`ALTER TABLE articles ADD COLUMN aid VARCHAR(20)`).catch(() => {});
+    await mysqlConnection.execute(`ALTER TABLE articles ADD COLUMN board VARCHAR(50)`).catch(() => {});
 
     // 建立 stats 表
     await mysqlConnection.execute(`
@@ -52,25 +59,31 @@ async function initDatabase() {
  * 將單篇文章插入 MySQL（避免重複）
  * @param {Object} article - 文章物件
  */
-async function insertArticle(article) {
+async function insertArticle(article, { skipContent = false } = {}) {
   try {
     if (!mysqlConnection) {
       console.error("❌ MySQL 未初始化");
       return false;
     }
 
+    const aid = extractAid(article.link)
+    const board = extractBoard(article.link)
     const sql = `
-        INSERT INTO articles (push, title, author, date, link)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO articles (push, title, author, date, link, aid, board)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             push = VALUES(push),
-            title = VALUES(title)`;
+            title = VALUES(title),
+            aid = VALUES(aid),
+            board = VALUES(board)`;
     const [result] = await mysqlConnection.execute(sql, [
       article.push,
       article.title,
       article.author,
       article.date,
       article.link,
+      aid,
+      board,
     ]);
     // console.log(result)
     const isNew = result.insertId != 0 && result.affectedRows === 1;
@@ -106,7 +119,7 @@ async function insertArticle(article) {
         }): ${article.title.substring(0, 20)}...`
       );
     }
-    await crawlContentAndComments(result.insertId, article.link);
+    if (!skipContent) await crawlContentAndComments(result.insertId, article.link);
     return isNew || isUpdated;
   } catch (err) {
     console.error(`插入錯誤: ${err.message}`);
@@ -237,14 +250,32 @@ async function getTotalPages() {
     return total
   } catch (error) {
     console.error("偵測總頁數錯誤:", error.message);
-    return config.endPage
+    console.log("3 秒後重試一次...");
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const response = await axios.get(url, { headers: config.headers, timeout: 10000 });
+      const $ = cheerio.load(response.data);
+      const upperLink = $(".btn-group-paging a")
+        .filter((i, el) => $(el).text().trim().includes("上頁"))
+        .attr("href");
+      const match = upperLink && upperLink.match(/index(\d+)\.html$/);
+      if (match) {
+        const total = parseInt(match[1], 10);
+        console.log(`✅ 重試成功，總頁數：${total}`);
+        return total;
+      }
+    } catch (e) {
+      console.error("重試失敗:", e.message);
+    }
+    console.error("無法偵測總頁數，跳過本次爬取");
+    throw new Error("無法偵測總頁數");
   }
 }
 
 /**
  * 爬取單一頁面
  */
-async function crawlSinglePage(pageNum) {
+async function crawlSinglePage(pageNum, { skipContent = false } = {}) {
   const url = generateUrl(pageNum)
   console.log(`正在爬取第 ${pageNum ? pageNum : "首"} 頁 (URL: ${url})`)
 
@@ -296,8 +327,7 @@ async function crawlSinglePage(pageNum) {
         link: `https://www.ptt.cc${link}`,
       }
 
-      // 插入 DB
-      await insertArticle(article)
+      await insertArticle(article, { skipContent })
       articleList.push(article)
     }
 
@@ -483,17 +513,14 @@ async function crawlContentAndComments(articleId, link) {
       [content, formattedPostTime, articleIp, articleId]
     )
 
-    // 單獨 INSERT 每個推文（含 IP）
     if (comments.length > 0) {
-      for (const { userId, comment, ip } of comments) {
-        await mysqlConnection.execute(
-          `INSERT IGNORE INTO comments (articleId, userId, comment, ip) 
-                     VALUES (?, ?, ?, ?) 
-                     ON DUPLICATE KEY UPDATE updatedAt = CURRENT_TIMESTAMP`,
-          [articleId, userId, comment, ip]
-        );
-      }
-      console.log(`  插入 ${comments.length} 則推文(重複已忽略)`);
+      const placeholders = comments.map(() => '(?, ?, ?, ?)').join(', ')
+      const values = comments.flatMap(({ userId, comment, ip }) => [articleId, userId, comment, ip])
+      await mysqlConnection.execute(
+        `INSERT IGNORE INTO comments (articleId, userId, comment, ip) VALUES ${placeholders}`,
+        values
+      )
+      console.log(`  插入 ${comments.length} 則推文(重複已忽略)`)
     }
 
     console.log(
@@ -515,7 +542,7 @@ async function crawlContentAndComments(articleId, link) {
   }
 }
 
-async function crawlNewPosts(lastestPageCount = 10, boardName) {
+async function crawlNewPosts(lastestPageCount = 10, boardName, { skipContent = false } = {}) {
   if (boardName) {
     config.boardName = boardName;
     config.statsFileName = path.join(__dirname, `${config.boardName}_stats.json`);
@@ -534,7 +561,7 @@ async function crawlNewPosts(lastestPageCount = 10, boardName) {
     let allArticles = [];
     for (let index = 0; index <= lastestPageCount; index++) {
       const page = index === 0 ? undefined : config.endPage - index;
-      const articles = await crawlSinglePage(page);
+      const articles = await crawlSinglePage(page, { skipContent });
       allArticles = allArticles.concat(articles);
 
       if (page < config.endPage) {

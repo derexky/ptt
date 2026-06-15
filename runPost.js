@@ -10,6 +10,8 @@ const aliasMap = {
   t: 'target',
   k: 'kind',
   c: 'category',
+  i: 'id',
+  w: 'password',
 }
 
 const rawArgs = process.argv.slice(2)
@@ -47,11 +49,20 @@ const isNeedBackup = process.env.NODE_ENV === 'develop'
 
 const isNewPost = !!args.subject
 
-const id = process.env.PTT_ID || 'your_ptt_id'
-const password = process.env.PTT_PASSWORD || 'your_ptt_password'
 const isSendByWord = true
 
+function resolveCredentials() {
+  const id = args.id || process.env.PTT_ID
+  const password = args.password || process.env.PTT_PASSWORD
+  if (!id || !password) {
+    console.error('❌ 缺少帳號密碼：請用 --id / --password 或設定 PTT_ID / PTT_PASSWORD 環境變數')
+    process.exit(1)
+  }
+  return { id, password }
+}
+
 async function runPost() {
+  const { id, password } = resolveCredentials()
   const controller = new Poster(id, password)
   const draft = isNewPost && args.path ? readFile(args.path) : null
 

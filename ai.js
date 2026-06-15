@@ -30,12 +30,12 @@ const { GoogleGenerativeAI } = require('@google/generative-ai')
 // 【新增】記錄上次成功呼叫的時間
 let lastCallTime = 0
 // 【新增】設定最小間隔時間（2 分鐘 = 120,000 毫秒）
-const MIN_INTERVAL = 120000
+const MIN_INTERVAL = 10000
 
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 async function generateContentByGoogle({ prompt, stance, target, isTroll = true }) {
-  let viewpoint = stance || `你是一位資深鄉民，回文中會帶著低俗詼諧且有點嘲諷的語氣` 
+  let viewpoint = stance || `你是一位資深鄉民，回文中會帶著低俗詼諧且有點嘲諷的語氣`
   if(target) viewpoint += `以${isTroll ? '諷刺' : '讚揚'}${target}的客觀態度來回應問題`
   const now = Date.now()
   const timeElapsed = now - lastCallTime

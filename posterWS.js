@@ -485,6 +485,9 @@ class Poster {
   }
 
   getAiText = async (drift) => {
+    if (this.preGeneratedContent) {
+      return divideParagraph(this.preGeneratedContent, getRandomInt(35, 65))
+    }
     const prompt = drift +
       '\r\n根據前述內容延伸並發表看法,\r\n回覆的文章不要包括上述內容的引文和推文,\r\n也不需要作者,看板,標題,時間的格式化部分'
     const isUseAI = this.stance || this.target
@@ -859,6 +862,7 @@ class Poster {
     this.target = target
     this.stance = stance
     this.category = category
+    this.preGeneratedContent = options.preGeneratedContent || null
 
     this.isSendByWord = !!isSendByWord
     this.isNeedBackup = !!isNeedBackup

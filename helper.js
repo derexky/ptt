@@ -84,9 +84,39 @@ const getRandomInt = (min, max) => {
   return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+const AID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_'
+
+function extractAid(link) {
+  const match = link.match(/M\.(\d+)\.[A-Z]\.([0-9A-Fa-f]+)\.html/)
+  if (!match) return null
+
+  let ts = parseInt(match[1], 10)
+  let tsStr = ''
+  for (let i = 0; i < 6; i++) {
+    tsStr = AID_CHARS[ts % 64] + tsStr
+    ts = Math.floor(ts / 64)
+  }
+
+  let suffix = parseInt(match[2], 16)
+  let suffixStr = ''
+  for (let i = 0; i < 2; i++) {
+    suffixStr = AID_CHARS[suffix % 64] + suffixStr
+    suffix = Math.floor(suffix / 64)
+  }
+
+  return tsStr + suffixStr
+}
+
+function extractBoard(link) {
+  const match = link.match(/\/bbs\/([^/]+)\//)
+  return match ? match[1] : null
+}
+
 module.exports = {
   divideParagraph,
   readFile,
   writeFile,
   getRandomInt,
+  extractAid,
+  extractBoard,
 }
