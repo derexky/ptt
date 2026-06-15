@@ -23,6 +23,11 @@ const job = schedule.scheduleJob(cronExpr, async () => {
   }
 })
 
+if (!job) {
+  console.error(`Invalid CRON_SCHEDULE: "${cronExpr}". Using default.`)
+  process.exit(1)
+}
+
 console.log(`Scheduler started. Cron: "${cronExpr}"`)
 console.log(`Next fire: ${job.nextInvocation()}`)
 console.log('Press Ctrl+C to stop.')

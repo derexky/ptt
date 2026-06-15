@@ -125,7 +125,7 @@ async function replyWithBot(bot, article, board) {
 
   try {
     const result = await Promise.race([poster.contentReady, timeout])
-    console.log(`[Bot ${bot.ptt_id}] Content ready: "${String(result.text || '').slice(0, 60)}..."`)
+    console.log(`[Bot ${bot.ptt_id}] Content ready: "${String(result.content || result.text || '').slice(0, 60)}..."`)
     poster.continueState()
     return true
   } catch (err) {
@@ -161,51 +161,55 @@ async function runWorkflow() {
     for (const topic of topics) {
       console.log(`\n📋 Topic: board=${topic.board} keywords=${JSON.stringify(topic.keywords)}`)
 
-      // Step 1: Crawl latest articles into DB
-      console.log(`Crawling ${topic.board}...`)
-      await crawlNewPosts(10, topic.board)
+      try {
+        // Step 1: Crawl latest articles into DB
+        console.log(`Crawling ${topic.board}...`)
+        await crawlNewPosts(10, topic.board)
 
-      // Step 2: Query the DB for articles from this board
-      const [articles] = await conn.execute(
-        `SELECT id, title, link FROM articles
-          WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
-        [`%/bbs/${topic.board}/%`]
-      )
-      console.log(`DB returned ${articles.length} articles for ${topic.board}`)
+        // Step 2: Query the DB for articles from this board
+        const [articles] = await conn.execute(
+          `SELECT id, title, link FROM articles
+            WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
+          [`%/bbs/${topic.board}/%`]
+        )
+        console.log(`DB returned ${articles.length} articles for ${topic.board}`)
 
-      // Step 3: Keyword pre-filter
-      const keyFiltered = keywordFilter(articles, topic.keywords)
-      console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
-      if (keyFiltered.length === 0) continue
+        // Step 3: Keyword pre-filter
+        const keyFiltered = keywordFilter(articles, topic.keywords)
+        console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
+        if (keyFiltered.length === 0) continue
 
-      // Step 4: AI filter (1 AI call per topic)
-      await waitForAiRateLimit()
-      console.log(`Running AI filter on ${keyFiltered.length} article(s)...`)
-      const selected = await aiFilter(keyFiltered, topic.ai_prompt)
-      markAiCall()
-      console.log(`AI selected ${selected.length} article(s)`)
-      if (selected.length === 0) continue
+        // Step 4: AI filter (1 AI call per topic)
+        await waitForAiRateLimit()
+        console.log(`Running AI filter on ${keyFiltered.length} article(s)...`)
+        const selected = await aiFilter(keyFiltered, topic.ai_prompt)
+        markAiCall()
+        console.log(`AI selected ${selected.length} article(s)`)
+        if (selected.length === 0) continue
 
-      // Step 5: Reply loop — each bot × each selected article
-      for (const article of selected) {
-        for (const bot of bots) {
-          const already = await hasReplied(conn, bot.id, article.link)
-          if (already) {
-            console.log(`[Bot ${bot.ptt_id}] Already replied to "${article.title}", skipping`)
-            continue
-          }
+        // Step 5: Reply loop — each bot × each selected article
+        for (const article of selected) {
+          for (const bot of bots) {
+            const already = await hasReplied(conn, bot.id, article.link)
+            if (already) {
+              console.log(`[Bot ${bot.ppt_id}] Already replied to "${article.title}", skipping`)
+              continue
+            }
 
-          console.log(`[Bot ${bot.ptt_id}] Replying to: "${article.title}"`)
+            console.log(`[Bot ${bot.ppt_id}] Replying to: "${article.title}"`)
 
-          // Wait for AI rate limit before the Poster's internal AI call
-          await waitForAiRateLimit()
+            // Wait for AI rate limit before the Poster's internal AI call
+            await waitForAiRateLimit()
 
-          const ok = await replyWithBot(bot, article, topic.board)
-          if (ok) {
-            await logReply(conn, bot.id, article.link)
-            console.log(`[Bot ${bot.ptt_id}] ✅ Reply logged`)
+            const ok = await replyWithBot(bot, article, topic.board)
+            if (ok) {
+              await logReply(conn, bot.id, article.link)
+              console.log(`[Bot ${bot.ppt_id}] ✅ Reply logged`)
+            }
           }
         }
+      } catch (err) {
+        console.error(`[Topic ${topic.board}] Error, skipping:`, err.message)
       }
     }
 
