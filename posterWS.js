@@ -228,10 +228,12 @@ class Poster {
       { status: 'posting', phase: 'saving', message: 'Sending save (Ctrl+X / S)' },
       { immediate: true }
     )
-    // 發送完畢後，結束編輯：Ctrl + X (\x18)
-    this.currentState = status.postDone
+    // 先送出 Ctrl+X 和 S，再切換狀態。
+    // 若提前切到 postDone，PTT echo 最後一批字元時就會誤觸 postDone handler，
+    // 導致 stream 關閉、success 回報，但 Ctrl+X/S 根本沒送出，文章未儲存。
     await this.delayWrite(keywordMap.input_ctl_x)
     await this.delayWrite(keywordMap.input_Save)
+    this.currentState = status.postDone
   }
 
   /**
@@ -631,15 +633,30 @@ class Poster {
             this.postContent = await this.getAiText(this.draft)
             this.handleResolve({ text: this.postContent })
           } else {
-            this.send(`#`, _ => {
-              this.currentState = status.searchArticle
-              this.onBoardScreenBuf = ''
-              this._searchArticleTimer = setTimeout(() => {
-                if (this.currentState === status.searchArticle) {
-                  void this.failJob(new Error('Search article timeout: PTT did not respond to # command'))
-                }
-              }, 30000)
-            })
+            // 先切換狀態，防止後續 board listing frames 再次觸發此區塊
+            this.currentState = status.searchArticle
+            this.onBoardScreenBuf = ''
+
+            let _hashRetried = false
+            const scheduleHash = (delayMs) => {
+              setTimeout(() => {
+                if (this.currentState !== status.searchArticle) return
+                this.send('#')
+                clearTimeout(this._searchArticleTimer)
+                this._searchArticleTimer = setTimeout(() => {
+                  if (this.currentState !== status.searchArticle) return
+                  if (!_hashRetried) {
+                    _hashRetried = true
+                    console.log('\n[Auto] # search timeout, retrying...')
+                    scheduleHash(0)
+                  } else {
+                    void this.failJob(new Error('Search article timeout: PTT did not respond to # command'))
+                  }
+                }, 45000)
+              }, delayMs)
+            }
+            // 延遲 800ms 讓 PTT 板面完整載入後再送 #
+            scheduleHash(800)
           }
         }
         break
