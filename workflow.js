@@ -178,7 +178,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady 
     return { ok: false, aiContent: null }
   }
 
-  const stance = [bot.stance, bot.tone, '回覆內容至少500字'].filter(Boolean).join('\n')
+  const stance = [bot.stance, bot.tone, '回覆內容500到800字之間'].filter(Boolean).join('\n')
   const poster = new Poster(bot.ptt_id, bot.password)
 
   const postPromise = poster.postArticle({
@@ -191,7 +191,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady 
   }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
 
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Reply timeout after 15 minutes')), 900000)
+    setTimeout(() => reject(new Error('Reply timeout after 20 minutes')), 1200000)
   )
 
   try {

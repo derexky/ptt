@@ -513,7 +513,8 @@ class Poster {
     let logMessage = ''
     let writeInput = ''
 
-    if (chunk.includes(keywordMap.welcome) || chunk.includes(keywordMap.overload)) {
+    if ((chunk.includes(keywordMap.welcome) || chunk.includes(keywordMap.overload))
+        && this.currentState !== status.searchArticle) {
       writeInput = keywordMap.input_right
       logMessage = chunk.includes(keywordMap.welcome) ? 'Skipping welcome screen.' : 'Skipping overload warning.'
       handled = true
