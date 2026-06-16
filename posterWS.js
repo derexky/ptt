@@ -86,6 +86,7 @@ class Poster {
 
     this.abortSignal = false
     this.aiContent = null
+    this._searchArticleTimer = null
 
     this.retryCount = 0
 
@@ -120,6 +121,7 @@ class Poster {
     this._postReject = null
     this._jobFailed = false
     this._completedOk = false
+    this._onPostDone = null
   }
 
   /**
@@ -201,6 +203,7 @@ class Poster {
 
   abort = () => {
     this.abortSignal = true
+    clearTimeout(this._searchArticleTimer)
     if (this.stream) {
       console.log('\n[Auto] Aborting connection...')
       this.stream.close() // 強制終止連線
@@ -480,7 +483,8 @@ class Poster {
       console.log(`\n[Auto] Content ready, pausing task for index.js callback.`)
     }
     // readArticle 會提早 return 而跳過 handleState 結尾的 isProcessing = false；
-    // 暫停期間若維持 true，WebSocket 封包會全部被丟棄，continueState 後對不到回文畫面。
+    // 切換到 pause 防止 AI 生成期間收到的 PTT 封包誤觸 readArticle 邏輯送出 input_right 讓畫面跑掉。
+    this.currentState = status.pause
     this.isProcessing = false
   }
 
@@ -632,6 +636,11 @@ class Poster {
             this.send(`#`, _ => {
               this.currentState = status.searchArticle
               this.onBoardScreenBuf = ''
+              this._searchArticleTimer = setTimeout(() => {
+                if (this.currentState === status.searchArticle) {
+                  void this.failJob(new Error('Search article timeout: PTT did not respond to # command'))
+                }
+              }, 30000)
             })
           }
         }
@@ -639,6 +648,7 @@ class Poster {
       }
       case status.searchArticle:
         if(chunk.includes(keywordMap.searchArticle)) {
+          clearTimeout(this._searchArticleTimer)
           console.log('\n[Auto] On board, searching article...')
           this.reportProgress({ status: 'running', phase: 'searching_article' }, { immediate: true })
 
@@ -778,6 +788,9 @@ class Poster {
       case status.postDone:
         console.log('\n[Auto] Post done.')
         this._completedOk = true
+        if (this._onPostDone) {
+          try { await this._onPostDone() } catch (e) { console.error('[Poster] onPostDone error:', e.message) }
+        }
         try {
           await this.emitProgress(
             {
@@ -830,6 +843,7 @@ class Poster {
       isSendByWord,
       isNeedBackup,
       onProgress,
+      onPostDone,
       jobRef,
       jobId: jobIdOpt,
       progressThrottleMs,
@@ -837,6 +851,7 @@ class Poster {
     } = options
 
     this._onProgress = typeof onProgress === 'function' ? onProgress : null
+    this._onPostDone = typeof onPostDone === 'function' ? onPostDone : null
     this.jobRef = jobRef != null ? jobRef : null
     this.jobId =
       jobIdOpt != null

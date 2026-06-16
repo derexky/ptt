@@ -100,7 +100,7 @@ async function logReply(conn, botId, articleLink, { board, articleTitle, topicId
 
 async function getFailedReplies(conn, botId, board) {
   const [rows] = await conn.execute(
-    `SELECT article_link, article_title FROM reply_log
+    `SELECT article_link, article_title, ai_content FROM reply_log
      WHERE bot_id = ? AND board = ? AND success = FALSE
      ORDER BY replied_at DESC`,
     [botId, board]
