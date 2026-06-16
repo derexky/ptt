@@ -1,0 +1,13 @@
+node_modules
+.env
+backup
+debug.log
+server.log
+tmp
+content
+docs
+public
+functions
+scripts
+.git
+*.md
