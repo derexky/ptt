@@ -1,0 +1,40 @@
+name: Deploy to myhost
+
+on:
+  push:
+    branches: [feature/test, main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to QNAP NAS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: 114.32.250.33
+          username: derexky
+          key: ${{ secrets.NAS_SSH_KEY }}
+          script: |
+            set -e
+            DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/usr/bin/docker
+
+            echo "=== Git pull ==="
+            $DOCKER run --rm \
+              -v /share/homes/derexky/.ssh/ptt_deploy_key:/root/ptt_deploy_key:ro \
+              -v /share/CACHEDEV1_DATA/ptt:/repo \
+              -e "GIT_SSH_COMMAND=ssh -i /root/ptt_deploy_key -o StrictHostKeyChecking=no" \
+              alpine/git -c safe.directory=/repo -C /repo pull
+
+            echo "=== Docker build ==="
+            DOCKER_BUILDKIT=0 $DOCKER build -t ptt-scheduler:latest /share/CACHEDEV1_DATA/ptt
+
+            echo "=== Restart container ==="
+            ENV_ARGS=$($DOCKER inspect ptt-scheduler --format '{{range .Config.Env}}-e "{{.}}" {{end}}' 2>/dev/null || echo '')
+            $DOCKER rm -f ptt-scheduler 2>/dev/null || true
+            eval $DOCKER run -d --name ptt-scheduler $ENV_ARGS ptt-scheduler:latest
+
+            echo "=== Prune images ==="
+            $DOCKER image prune -f
+
+            echo "=== Done ==="
+            $DOCKER ps --filter name=ptt-scheduler
