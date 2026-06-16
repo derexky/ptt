@@ -4,6 +4,7 @@ const readline = require('readline') // 引入 readline 用於進度條
 const { w3cwebsocket } = require('websocket')
 const iconv = require('iconv-lite')
 const { generateContentByGoogle } = require('./ai') // 假設這是您的 AI 函式
+const config = require('./config')
 const {
   divideParagraph,
   writeFile,
@@ -238,15 +239,10 @@ class Poster {
    */
   updatePostingProgress = (current, total, type) => {
     const progress = Math.round((current / total) * 100)
-    // 使用 \r 確保在同一行
-    const output = `\r[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`
-    if (isDev) {
+    if (isDev && process.stdout.isTTY) {
       readline.cursorTo(process.stdout, 0)
-      process.stdout.write(output)
-
-      if (current === total) {
-        process.stdout.write('\n')
-      }
+      process.stdout.write(`\r[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
+      if (current === total) process.stdout.write('\n')
     } else {
       console.log(`[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
     }
@@ -269,37 +265,33 @@ class Poster {
    * 逐字發文 (帶進度條)
    */
   postEachWord = async () => {
-    // 將內容處理為單一字串：替換 \n 為 \r\n，\t 為空格
     let fullContent = this.postContent
       .replace(/\n/g, '\r\n')
       .replace(/\t/g, ' ')
     let idx = 0
-    const sendCharBatch = (batchSize = 2) => {
-      const rndDelay = getRandomInt(1000, 1100)
 
+    const sendSize = isDev ? 1 : Math.ceil(fullContent.length / 500)
+
+    console.log(`[Auto] Posting: ${fullContent.length} chars, sendSize=${sendSize}, delay=[${config.postMinDelayMs},${config.postMaxDelayMs}]ms`)
+
+    const sendCharBatch = () => {
       return new Promise((resolve) => {
         if (idx < fullContent.length) {
-          // 計算這次要發送的範圍，避免超出陣列長度
-          const end = Math.min(idx + batchSize, fullContent.length)
+          const end = Math.min(idx + sendSize, fullContent.length)
           const batch = fullContent.slice(idx, end)
-
           this.updatePostingProgress(end, fullContent.length, 'Char')
-
           this.send(batch)
-
           idx = end
-
-          setTimeout(() => resolve(false), rndDelay)
+          setTimeout(() => resolve(false), getRandomInt(config.postMinDelayMs, config.postMaxDelayMs))
         } else {
-          resolve(true) // 已全部發送完畢
+          resolve(true)
         }
       })
     }
-  
-    const sendSize = isDev ? 1 : Math.ceil(fullContent.length / 500) // functions上的存活時間大約500次(每秒一次)發送完畢
+
     let done = false
     while (!done) {
-      done = await sendCharBatch(sendSize)
+      done = await sendCharBatch()
     }
 
     await this.finishPost()
@@ -509,7 +501,13 @@ class Poster {
       }
     }
     const rnd = getRandomInt(35, 65)
-    return divideParagraph(rawText, rnd)
+    const text = divideParagraph(rawText, rnd)
+    if (text.length <= config.postMaxChars) return text
+    const cut = text.slice(0, config.postMaxChars)
+    const lastEnd = Math.max(...['。', '！', '？', '…'].map(c => cut.lastIndexOf(c)))
+    if (lastEnd > 0) return cut.slice(0, lastEnd + 1).trimEnd()
+    const lastNl = cut.lastIndexOf('\n')
+    return lastNl > 0 ? cut.slice(0, lastNl) : cut
   }
 
   handleNoise = (chunk) => {

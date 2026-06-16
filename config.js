@@ -1,12 +1,16 @@
 // --- 設定 ---
 module.exports = {
+    replyTimeoutMs: 1200000,  // 20 minutes — workflow.js Promise.race timeout
+    postMinDelayMs: 1001,     // ms — PTT requires ≥1s per char to earn P coins
+    postMaxDelayMs: 1050,     // ms — upper bound for per-char random delay
+    postMaxChars: 900,        // max AI content chars before sentence-boundary truncation
     // MySQL 連接設定（請根據環境修改）
     mysql: {
-        host: 'localhost',
-        user: 'root', // 預設 MySQL 用戶
-        password: 'passwd', // 請修改密碼
-        database: 'ptt', // 資料庫名稱
-        port: 3306
+        host: process.env.MYSQL_HOST || 'localhost',
+        user: process.env.MYSQL_USER || 'root',
+        password: process.env.MYSQL_PASSWORD || 'passwd',
+        database: process.env.MYSQL_DATABASE || 'ptt',
+        port: parseInt(process.env.MYSQL_PORT || '3306', 10),
     },
     boardName: 'Gossiping', // 可修改看板名稱
     startPage: 1,
