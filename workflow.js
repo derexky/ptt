@@ -119,9 +119,11 @@ async function updateReplyLog(conn, botId, articleLink, { success, aiContent }) 
 const DAILY_BOARD_LIMIT = 5
 
 async function countTodayBoardReplies(conn, botId, board) {
+  // DB 時區為 UTC，用 +8 偏移換算成台灣日期，確保午夜重置時間正確
   const [rows] = await conn.execute(
     `SELECT COUNT(DISTINCT article_link) AS cnt FROM reply_log
-     WHERE bot_id = ? AND article_link LIKE ? AND DATE(replied_at) = CURDATE()`,
+     WHERE bot_id = ? AND article_link LIKE ?
+       AND DATE(replied_at + INTERVAL 8 HOUR) = DATE(NOW() + INTERVAL 8 HOUR)`,
     [botId, `%/bbs/${board}/%`]
   )
   return rows[0].cnt
