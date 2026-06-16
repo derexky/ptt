@@ -170,7 +170,7 @@ function markAiCall() {
 
 // ── Reply ────────────────────────────────────────────────────────────
 
-async function replyWithBot(bot, article, { preGeneratedContent, onContentReady } = {}) {
+async function replyWithBot(bot, article, { preGeneratedContent, onContentReady, onPostDone } = {}) {
   const aid = article.aid || extractAid(article.link)
   const board = article.board
   if (!aid || !board) {
@@ -188,6 +188,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady 
     isSendByWord: true,
     isNeedBackup: false,
     preGeneratedContent: preGeneratedContent || null,
+    onPostDone,
   }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
 
   const timeout = new Promise((_, reject) =>
@@ -259,7 +260,7 @@ async function runWorkflow() {
 
           // Step 2: Query the DB for articles from this board
           const [articles] = await conn.execute(
-            `SELECT id, title, link, aid, board FROM articles
+            `SELECT id, title, link, aid, board, push FROM articles
               WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
             [`%/bbs/${topic.board}/%`]
           )
@@ -307,6 +308,10 @@ async function runWorkflow() {
                     return false
                   }
                   await updateReplyLog(conn, bot.id, failedReply.article_link, { success: false, aiContent: content })
+                },
+                onPostDone: async () => {
+                  await updateReplyLog(conn, bot.id, failedReply.article_link, { success: true, aiContent: failedReply.ai_content })
+                  console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
                 },
               })
               if (skipped) {
@@ -362,6 +367,10 @@ async function runWorkflow() {
                   success: false,
                   aiContent: content,
                 })
+              },
+              onPostDone: async () => {
+                await updateReplyLog(conn, bot.id, target.link, { success: true, aiContent })
+                console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
               },
             })
             if (skipped) {
