@@ -29,9 +29,10 @@ jobs:
             DOCKER_BUILDKIT=0 $DOCKER build -t ptt-scheduler:latest /share/CACHEDEV1_DATA/ptt
 
             echo "=== Restart container ==="
-            ENV_ARGS=$($DOCKER inspect ptt-scheduler --format '{{range .Config.Env}}-e "{{.}}" {{end}}' 2>/dev/null || echo '')
+            $DOCKER inspect ptt-scheduler --format '{{range .Config.Env}}{{println .}}{{end}}' > /tmp/ptt.env 2>/dev/null || true
             $DOCKER rm -f ptt-scheduler 2>/dev/null || true
-            eval $DOCKER run -d --name ptt-scheduler $ENV_ARGS ptt-scheduler:latest
+            $DOCKER run -d --name ptt-scheduler --env-file /tmp/ptt.env ptt-scheduler:latest
+            rm -f /tmp/ptt.env
 
             echo "=== Prune images ==="
             $DOCKER image prune -f
