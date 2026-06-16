@@ -192,7 +192,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
   }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
 
   const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Reply timeout after 20 minutes')), 1200000)
+    setTimeout(() => reject(new Error(`Reply timeout after ${config.replyTimeoutMs / 60000} minutes`)), config.replyTimeoutMs)
   )
 
   try {
@@ -277,7 +277,7 @@ async function runWorkflow() {
             const selected = await aiFilter(keyFiltered, topic.ai_prompt)
             markAiCall()
             console.log(`AI selected ${selected.length} article(s)`)
-            const parsePush = p => p === '爆' || p === '100+' ? 100 : (parseInt(p) || 0)
+            const parsePush = p => p === '100+' ? 100 : (parseInt(String(p).replace(/^X/, '')) || 0)
             sortedArticles = [...selected].sort((a, b) => parsePush(b.push) - parsePush(a.push))
           }
         } else {

@@ -12,14 +12,14 @@ function keywordFilter(articles, keywords) {
 async function aiFilter(articles, aiPrompt) {
   if (articles.length === 0) return []
 
-  const titlesText = articles.map((a, i) => `${i}: ${a.title}`).join('\n')
+  const titlesText = articles.map((a, i) => `${i}: [push:${a.push ?? 0}] ${a.title}`).join('\n')
   const prompt = [
     aiPrompt,
     '',
-    '以下是文章標題清單（格式：索引: 標題）：',
+    '以下是文章標題清單（格式：索引: [push:推文數] 標題），push 數字越高代表討論熱度越高，「100+」或「爆」代表超過 100 則推文：',
     titlesText,
     '',
-    '請從中選出值得回文的文章，以 JSON 陣列格式回傳選出的索引，例如：[0, 2, 5]。只輸出 JSON，不要其他說明文字。',
+    '請從中選出值得回文的文章，優先考慮 push 數較高的文章，以 JSON 陣列格式回傳選出的索引，例如：[0, 2, 5]。只輸出 JSON，不要其他說明文字。',
   ].join('\n')
 
   const result = await generateContentByGoogle({
