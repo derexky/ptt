@@ -354,12 +354,14 @@ async function runWorkflow() {
             console.log(`[Bot ${bot.ptt_id}] Replying to: "${target.title}" (push: ${target.push})`)
 
             await waitForAiRateLimit()
+            let capturedContent = null
             const { ok, aiContent, skipped } = await replyWithBot(bot, target, {
               onContentReady: async (content) => {
                 if (await hasDuplicateContent(conn, bot.id, content)) {
                   console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content detected, skipping post`)
                   return false
                 }
+                capturedContent = content
                 await logReply(conn, bot.id, target.link, {
                   board: topic.board,
                   articleTitle: target.title,
@@ -369,7 +371,7 @@ async function runWorkflow() {
                 })
               },
               onPostDone: async () => {
-                await updateReplyLog(conn, bot.id, target.link, { success: true, aiContent })
+                await updateReplyLog(conn, bot.id, target.link, { success: true, aiContent: capturedContent })
                 console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
               },
             })
