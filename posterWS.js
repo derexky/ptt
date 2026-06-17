@@ -165,6 +165,7 @@ class Poster {
   failJob = async (err) => {
     if (this._jobFailed) return
     this._jobFailed = true
+    if (this.stream) this.stream.close()
     const message = err?.message || String(err)
     try {
       await this.emitProgress(

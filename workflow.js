@@ -291,9 +291,11 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
 
   const stance = [bot.stance, bot.tone, '回覆內容500到800字之間'].filter(Boolean).join('\n')
   const poster = new Poster(bot.ptt_id, bot.password)
-  const makeTimeout = () => new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`Reply timeout after ${config.replyTimeoutMs / 60000} minutes`)), config.replyTimeoutMs)
+  const makeTimeout = (ms, label) => new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
   )
+  const CONTENT_TIMEOUT_MS = 100_000       // 100s：登入 + AI 生成
+  const POST_TIMEOUT_MS = config.replyTimeoutMs // 20min：實際發文
 
   // Starts postArticle (triggers AI) and waits for content to be ready.
   // Runs inside aiRateLimiter so the AI call is serialised; postPromise continues after.
@@ -307,7 +309,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       preGeneratedContent: preGeneratedContent || null,
       onPostDone,
     }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
-    const result = await Promise.race([poster.contentReady, makeTimeout()])
+    const result = await Promise.race([poster.contentReady, makeTimeout(CONTENT_TIMEOUT_MS, 'content not ready within 100s')])
     return { postPromise, result }
   }
 
@@ -327,7 +329,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       }
     }
     poster.continueState()
-    await Promise.race([postPromise, makeTimeout()])
+    await Promise.race([postPromise, makeTimeout(POST_TIMEOUT_MS, `post not done within ${POST_TIMEOUT_MS / 60000} minutes`)])
     return { ok: true, aiContent }
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
