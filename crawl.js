@@ -72,7 +72,7 @@ async function insertArticle(article, { skipContent = false } = {}) {
     const aid = extractAid(article.link)
     const board = extractBoard(article.link)
     const sql = `
-        INSERT INTO articles (push, title, author, `date`, link, aid, board)
+        INSERT INTO articles (push, title, author, \`date\`, link, aid, board)
         VALUES (?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             push = VALUES(push),
