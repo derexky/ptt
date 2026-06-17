@@ -3,8 +3,8 @@ require('dotenv').config()
 const schedule = require('node-schedule')
 const { runWorkflow, runCrawl } = require('./workflow')
 
-const cronExpr  = process.env.CRON_SCHEDULE  || '*/30 * * * *'
 const crawlCron = process.env.CRAWL_SCHEDULE || '*/30 * * * *'
+const cronExpr  = process.env.CRON_SCHEDULE  || '10,40 * * * *'
 
 const runningBots = new Set()
 
