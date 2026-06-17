@@ -37,6 +37,7 @@ async function initDatabase() {
     `);
 
     // migration：既有 table 補欄位
+    await mysqlConnection.execute(`ALTER TABLE articles ADD COLUMN author VARCHAR(50) NOT NULL DEFAULT ''`).catch(() => {});
     await mysqlConnection.execute(`ALTER TABLE articles ADD COLUMN aid VARCHAR(20)`).catch(() => {});
     await mysqlConnection.execute(`ALTER TABLE articles ADD COLUMN board VARCHAR(50)`).catch(() => {});
 
