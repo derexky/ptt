@@ -9,28 +9,40 @@ const { extractAid } = require('./helper')
 
 // ── DB ──────────────────────────────────────────────────────────────
 
-async function createConnection() {
-  return mysql.createConnection(config.mysql)
+function createPool() {
+  return mysql.createPool(config.mysql)
 }
 
 async function initSchema(conn) {
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS bots (
-      id        INT AUTO_INCREMENT PRIMARY KEY,
-      ptt_id    VARCHAR(50) NOT NULL,
-      password  VARCHAR(100) NOT NULL,
-      stance    TEXT,
-      tone      VARCHAR(200),
-      is_active BOOLEAN DEFAULT TRUE
+      id         INT AUTO_INCREMENT PRIMARY KEY,
+      ptt_id     VARCHAR(50) NOT NULL,
+      password   VARCHAR(100) NOT NULL,
+      stance     TEXT,
+      tone       VARCHAR(200),
+      is_active  BOOLEAN DEFAULT TRUE,
+      start_hour TINYINT DEFAULT NULL,
+      end_hour   TINYINT DEFAULT NULL
     )
   `)
   await conn.execute(`
     CREATE TABLE IF NOT EXISTS topics (
-      id        INT AUTO_INCREMENT PRIMARY KEY,
-      board     VARCHAR(50) NOT NULL,
-      keywords  JSON NOT NULL,
-      ai_prompt TEXT,
-      is_active BOOLEAN DEFAULT TRUE
+      id          INT AUTO_INCREMENT PRIMARY KEY,
+      board       VARCHAR(50) NOT NULL,
+      keywords    JSON NOT NULL,
+      ai_prompt   TEXT,
+      daily_limit INT DEFAULT 5,
+      is_active   BOOLEAN DEFAULT TRUE
+    )
+  `)
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS bot_topic_subscriptions (
+      bot_id   INT NOT NULL,
+      topic_id INT NOT NULL,
+      PRIMARY KEY (bot_id, topic_id),
+      FOREIGN KEY (bot_id)   REFERENCES bots(id),
+      FOREIGN KEY (topic_id) REFERENCES topics(id)
     )
   `)
   await conn.execute(`
@@ -48,6 +60,37 @@ async function initSchema(conn) {
       FOREIGN KEY (bot_id) REFERENCES bots(id)
     )
   `)
+
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS article_topic_ai_result (
+      article_id    INT NOT NULL,
+      topic_id      INT NOT NULL,
+      selected      BOOLEAN NOT NULL,
+      push_at_cache INT DEFAULT 0,
+      PRIMARY KEY (article_id, topic_id),
+      FOREIGN KEY (article_id) REFERENCES articles(id),
+      FOREIGN KEY (topic_id)   REFERENCES topics(id)
+    )
+  `)
+
+  const [aiCols] = await conn.execute('SHOW COLUMNS FROM article_topic_ai_result')
+  if (!new Set(aiCols.map(c => c.Field)).has('push_at_cache')) {
+    await conn.execute('ALTER TABLE article_topic_ai_result ADD COLUMN push_at_cache INT DEFAULT 0')
+  }
+
+  const [botCols] = await conn.execute('SHOW COLUMNS FROM bots')
+  const botColSet = new Set(botCols.map(c => c.Field))
+  if (!botColSet.has('start_hour')) {
+    await conn.execute('ALTER TABLE bots ADD COLUMN start_hour TINYINT DEFAULT NULL')
+    await conn.execute('ALTER TABLE bots ADD COLUMN end_hour TINYINT DEFAULT NULL')
+  }
+
+  const [topicCols] = await conn.execute('SHOW COLUMNS FROM topics')
+  const topicColSet = new Set(topicCols.map(c => c.Field))
+  if (!topicColSet.has('daily_limit')) {
+    await conn.execute('ALTER TABLE topics ADD COLUMN daily_limit INT DEFAULT 5')
+  }
+
   const [existingCols] = await conn.execute('SHOW COLUMNS FROM reply_log')
   const colSet = new Set(existingCols.map(c => c.Field))
   const migrations = [
@@ -68,8 +111,13 @@ async function loadTopics(conn) {
   return rows.map(r => ({ ...r, keywords: Array.isArray(r.keywords) ? r.keywords : JSON.parse(r.keywords) }))
 }
 
-async function loadBots(conn) {
-  const [rows] = await conn.execute('SELECT * FROM bots WHERE is_active = TRUE')
+async function loadSubscribedBots(conn, topicId) {
+  const [rows] = await conn.execute(
+    `SELECT b.* FROM bots b
+     JOIN bot_topic_subscriptions s ON s.bot_id = b.id
+     WHERE s.topic_id = ? AND b.is_active = TRUE`,
+    [topicId]
+  )
   return rows
 }
 
@@ -116,7 +164,55 @@ async function updateReplyLog(conn, botId, articleLink, { success, aiContent }) 
   )
 }
 
-const DAILY_BOARD_LIMIT = 5
+async function getAiCachedIds(conn, topicId, articleIds) {
+  if (articleIds.length === 0) return new Set()
+  const placeholders = articleIds.map(() => '?').join(',')
+  const [rows] = await conn.execute(
+    `SELECT article_id FROM article_topic_ai_result WHERE topic_id = ? AND article_id IN (${placeholders})`,
+    [topicId, ...articleIds]
+  )
+  return new Set(rows.map(r => r.article_id))
+}
+
+async function saveAiResults(conn, topicId, articles) {
+  if (articles.length === 0) return
+  const placeholders = articles.map(() => '(?,?,?,?)').join(',')
+  await conn.execute(
+    `INSERT IGNORE INTO article_topic_ai_result (article_id, topic_id, selected, push_at_cache) VALUES ${placeholders}`,
+    articles.flatMap(a => [a.id, topicId, a.selected ? 1 : 0, parsePush(a.push)])
+  )
+}
+
+async function invalidateStaleAiCache(conn, board, threshold = 5) {
+  const [rows] = await conn.execute(
+    `SELECT r.article_id, r.push_at_cache, a.push
+     FROM article_topic_ai_result r
+     JOIN articles a ON a.id = r.article_id
+     WHERE a.link LIKE ? AND r.selected = FALSE`,
+    [`%/bbs/${board}/%`]
+  )
+  const stale = rows.filter(r => parsePush(r.push) - r.push_at_cache >= threshold)
+  if (stale.length === 0) return 0
+  const ids = stale.map(r => r.article_id)
+  const ph = ids.map(() => '?').join(',')
+  const [result] = await conn.execute(
+    `DELETE FROM article_topic_ai_result WHERE article_id IN (${ph}) AND selected = FALSE`,
+    ids
+  )
+  return result.affectedRows
+}
+
+async function getSelectedArticles(conn, topicId) {
+  const [rows] = await conn.execute(
+    `SELECT a.id, a.title, a.link, a.aid, a.board, a.push
+     FROM articles a
+     JOIN article_topic_ai_result r ON r.article_id = a.id
+     WHERE r.topic_id = ? AND r.selected = TRUE
+     ORDER BY a.id DESC LIMIT 100`,
+    [topicId]
+  )
+  return rows
+}
 
 async function countTodayBoardReplies(conn, botId, board) {
   // DB 時區為 UTC，用 +8 偏移換算成台灣日期，確保午夜重置時間正確
@@ -130,6 +226,13 @@ async function countTodayBoardReplies(conn, botId, board) {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
+
+function parsePush(p) {
+  if (p === '100+') return 100
+  const s = String(p)
+  if (s.startsWith('X')) return (parseInt(s.slice(1)) || 0) * 2
+  return parseInt(s) || 0
+}
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -151,28 +254,34 @@ async function hasRepliedToSameThread(conn, botId, board, baseTitle) {
   return rows.length > 0
 }
 
-// ai.js enforces 2-min min interval; track last call time ourselves
-// so we can sleep before each AI-calling step.
-const AI_MIN_INTERVAL = 12000 // 12 sec — slightly over the 10 s limit in ai.js
+// AI rate limiter — serialises all AI calls with a minimum interval between them.
+// withAiRateLimit(fn) queues fn behind any in-flight call and waits AI_MIN_INTERVAL
+// after the previous call completes before starting fn.
+const AI_MIN_INTERVAL = 12000
 let lastAiCallAt = 0
+let aiCallLock = Promise.resolve()
 
-async function waitForAiRateLimit() {
-  const elapsed = Date.now() - lastAiCallAt
-  if (lastAiCallAt > 0 && elapsed < AI_MIN_INTERVAL) {
-    const wait = AI_MIN_INTERVAL - elapsed
-    console.log(`⏳ Waiting ${Math.ceil(wait / 1000)}s for AI rate limit...`)
-    await sleep(wait)
-  }
+function withAiRateLimit(fn) {
+  const slot = aiCallLock.then(async () => {
+    const elapsed = Date.now() - lastAiCallAt
+    if (lastAiCallAt > 0 && elapsed < AI_MIN_INTERVAL) {
+      const wait = AI_MIN_INTERVAL - elapsed
+      console.log(`⏳ Waiting ${Math.ceil(wait / 1000)}s for AI rate limit...`)
+      await sleep(wait)
+    }
+    try {
+      return await fn()
+    } finally {
+      lastAiCallAt = Date.now()
+    }
+  })
+  aiCallLock = slot.catch(() => {})
+  return slot
 }
-
-function markAiCall() {
-  lastAiCallAt = Date.now()
-}
-
 
 // ── Reply ────────────────────────────────────────────────────────────
 
-async function replyWithBot(bot, article, { preGeneratedContent, onContentReady, onPostDone } = {}) {
+async function replyWithBot(bot, article, { preGeneratedContent, onContentReady, onPostDone, aiRateLimiter } = {}) {
   const aid = article.aid || extractAid(article.link)
   const board = article.board
   if (!aid || !board) {
@@ -182,25 +291,34 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
 
   const stance = [bot.stance, bot.tone, '回覆內容500到800字之間'].filter(Boolean).join('\n')
   const poster = new Poster(bot.ptt_id, bot.password)
-
-  const postPromise = poster.postArticle({
-    board,
-    aid,
-    stance,
-    isSendByWord: true,
-    isNeedBackup: false,
-    preGeneratedContent: preGeneratedContent || null,
-    onPostDone,
-  }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
-
   const makeTimeout = () => new Promise((_, reject) =>
     setTimeout(() => reject(new Error(`Reply timeout after ${config.replyTimeoutMs / 60000} minutes`)), config.replyTimeoutMs)
   )
 
-  try {
+  // Starts postArticle (triggers AI) and waits for content to be ready.
+  // Runs inside aiRateLimiter so the AI call is serialised; postPromise continues after.
+  const startAndGetContent = async () => {
+    const postPromise = poster.postArticle({
+      board,
+      aid,
+      stance,
+      isSendByWord: true,
+      isNeedBackup: false,
+      preGeneratedContent: preGeneratedContent || null,
+      onPostDone,
+    }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
     const result = await Promise.race([poster.contentReady, makeTimeout()])
+    return { postPromise, result }
+  }
+
+  try {
+    const { postPromise, result } = aiRateLimiter && !preGeneratedContent
+      ? await aiRateLimiter(startAndGetContent)
+      : await startAndGetContent()
+
     const aiContent = String(result.content || result.text || '')
     console.log(`[Bot ${bot.ptt_id}] Content ready: "${aiContent.slice(0, 60)}..."`)
+
     if (onContentReady) {
       const shouldPost = await onContentReady(aiContent)
       if (shouldPost === false) {
@@ -214,177 +332,209 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
     return { ok: false, aiContent: null }
+  }
+}
+
+// ── Crawl job ────────────────────────────────────────────────────────
+
+async function runCrawl() {
+  console.log(`\n[${new Date().toISOString()}] Starting crawl...`)
+  const pool = createPool()
+  try {
+    const topics = await loadTopics(pool)
+    const boards = [...new Set(topics.map(t => t.board))]
+    for (const board of boards) {
+      console.log(`Crawling ${board}...`)
+      await crawlNewPosts(5, board, { skipContent: true })
+      const deleted = await invalidateStaleAiCache(pool, board)
+      if (deleted > 0) console.log(`${board}: invalidated ${deleted} stale cache entries (push jumped ≥5)`)
+    }
+    console.log('✅ Crawl complete')
   } finally {
-    markAiCall()
+    await pool.end()
   }
 }
 
 // ── Main workflow ─────────────────────────────────────────────────────
 
-async function runWorkflow() {
+async function runWorkflow(runningBots = new Set()) {
   console.log(`\n[${new Date().toISOString()}] Starting workflow...`)
-  const conn = await createConnection()
+  const pool = createPool()
 
   try {
-    await initSchema(conn)
+    await initSchema(pool)
 
-    const topics = await loadTopics(conn)
-    const bots   = await loadBots(conn)
-
+    const topics = await loadTopics(pool)
     if (topics.length === 0) { console.log('No active topics.'); return }
-
-    console.log(`Loaded ${topics.length} topic(s), ${bots.length} bot(s)`)
-
-    if (bots.length === 0) {
-      console.log('No active bots.')
-      console.log(`\n✅ Workflow complete`)
-      return
-    }
+    console.log(`Loaded ${topics.length} topic(s)`)
 
     for (const topic of topics) {
       console.log(`\n📋 Topic: board=${topic.board} keywords=${JSON.stringify(topic.keywords)}`)
 
       try {
-        // Check each bot for pending failed replies on this board
+        const bots = await loadSubscribedBots(pool, topic.id)
+        console.log(`Subscribed bots: ${bots.length}`)
+
+        if (bots.length === 0) {
+          console.log(`No subscribed bots for topic ${topic.id}, skipping`)
+          continue
+        }
+
         const botFailedMap = new Map()
         for (const bot of bots) {
-          const failed = await getFailedReplies(conn, bot.id, topic.board)
+          const failed = await getFailedReplies(pool, bot.id, topic.board)
           if (failed.length > 0) botFailedMap.set(bot.id, failed)
         }
 
-        const botsNeedingNew = bots.filter(b => !botFailedMap.has(b.id))
-        let sortedArticles = []
+        const [rawArticles] = await pool.execute(
+          `SELECT id, title, link, aid, board, push FROM articles
+            WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
+          [`%/bbs/${topic.board}/%`]
+        )
+        console.log(`DB returned ${rawArticles.length} articles for ${topic.board}`)
 
-        if (botsNeedingNew.length > 0) {
-          // Step 1: Crawl latest articles into DB
-          console.log(`Crawling ${topic.board}...`)
-          await crawlNewPosts(5, topic.board, { skipContent: true })
+        const keyFiltered = keywordFilter(rawArticles, topic.keywords)
+        console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
 
-          // Step 2: Query the DB for articles from this board
-          const [articles] = await conn.execute(
-            `SELECT id, title, link, aid, board, push FROM articles
-              WHERE link LIKE ? ORDER BY id DESC LIMIT 100`,
-            [`%/bbs/${topic.board}/%`]
-          )
-          console.log(`DB returned ${articles.length} articles for ${topic.board}`)
-
-          // Step 3: Keyword pre-filter
-          const keyFiltered = keywordFilter(articles, topic.keywords)
-          console.log(`After keyword filter: ${keyFiltered.length} article(s)`)
-
-          if (keyFiltered.length > 0) {
-            // Step 4: AI filter (1 AI call per topic)
-            await waitForAiRateLimit()
-            console.log(`Running AI filter on ${keyFiltered.length} article(s)...`)
-            const selected = await aiFilter(keyFiltered, topic.ai_prompt)
-            markAiCall()
-            console.log(`AI selected ${selected.length} article(s)`)
-            const parsePush = p => p === '100+' ? 100 : (parseInt(String(p).replace(/^X/, '')) || 0)
-            sortedArticles = [...selected].sort((a, b) => parsePush(b.push) - parsePush(a.push))
+        if (keyFiltered.length > 0) {
+          const cachedIds = await getAiCachedIds(pool, topic.id, keyFiltered.map(a => a.id))
+          const uncached = keyFiltered.filter(a => !cachedIds.has(a.id))
+          if (uncached.length > 0) {
+            console.log(`Running AI filter on ${uncached.length} new article(s)...`)
+            try {
+              const selected = await withAiRateLimit(() => aiFilter(uncached, topic.ai_prompt))
+              const selectedIds = new Set(selected.map(a => a.id))
+              await saveAiResults(pool, topic.id, uncached.map(a => ({ id: a.id, selected: selectedIds.has(a.id), push: a.push })))
+              console.log(`AI selected ${selected.length} new, cached ${uncached.length}`)
+            } catch (err) {
+              console.error(`AI filter failed, skipping cache write:`, err.message)
+            }
+          } else {
+            console.log(`All ${keyFiltered.length} article(s) already AI-filtered, using cache`)
           }
-        } else {
-          console.log(`All bots have pending retries for ${topic.board}, skipping crawl`)
         }
 
-        const claimedThisRun = new Set()
+        const cachedSelected = await getSelectedArticles(pool, topic.id)
+        const sortedArticles = [...cachedSelected].sort((a, b) => parsePush(b.push) - parsePush(a.push))
+        console.log(`${sortedArticles.length} article(s) available for bots`)
 
-        for (const bot of bots) {
-          if (botFailedMap.has(bot.id)) {
-            // Retry path: re-post failed replies
-            const failed = botFailedMap.get(bot.id)
-            console.log(`[Bot ${bot.ptt_id}] ${failed.length} failed reply(s) to retry`)
-            for (const failedReply of failed) {
-              const article = {
-                link: failedReply.article_link,
-                title: failedReply.article_title,
-                board: topic.board,
+        const twHour = (new Date().getUTCHours() + 8) % 24
+
+        await Promise.all(bots.map(async (bot) => {
+          if (bot.start_hour !== null && bot.end_hour !== null) {
+            const inWindow = bot.start_hour <= bot.end_hour
+              ? twHour >= bot.start_hour && twHour < bot.end_hour
+              : twHour >= bot.start_hour || twHour < bot.end_hour
+            if (!inWindow) {
+              console.log(`[Bot ${bot.ptt_id}] 目前 ${twHour} 點不在啟動時段 ${bot.start_hour}-${bot.end_hour}，跳過`)
+              return
+            }
+          }
+
+          if (runningBots.has(bot.id)) {
+            console.log(`[Bot ${bot.ptt_id}] 上一輪尚未完成，跳過`)
+            return
+          }
+
+          runningBots.add(bot.id)
+          try {
+            if (botFailedMap.has(bot.id)) {
+              const failed = botFailedMap.get(bot.id)
+              console.log(`[Bot ${bot.ptt_id}] ${failed.length} failed reply(s) to retry`)
+              for (const failedReply of failed) {
+                const article = {
+                  link: failedReply.article_link,
+                  title: failedReply.article_title,
+                  board: topic.board,
+                }
+                const hasContent = !!failedReply.ai_content
+                console.log(`[Bot ${bot.ptt_id}] Retrying: "${failedReply.article_title}" (${hasContent ? 'reuse content' : 'regenerate'})`)
+                const { ok, aiContent, skipped } = await replyWithBot(bot, article, {
+                  preGeneratedContent: failedReply.ai_content || null,
+                  aiRateLimiter: withAiRateLimit,
+                  onContentReady: hasContent ? null : async (content) => {
+                    if (await hasDuplicateContent(pool, bot.id, content)) {
+                      console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content on retry, skipping`)
+                      return false
+                    }
+                    await updateReplyLog(pool, bot.id, failedReply.article_link, { success: false, aiContent: content })
+                  },
+                  onPostDone: async () => {
+                    await updateReplyLog(pool, bot.id, failedReply.article_link, { success: true, aiContent: failedReply.ai_content })
+                    console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
+                  },
+                })
+                if (skipped) {
+                  console.log(`[Bot ${bot.ptt_id}] ⏭️ Retry skipped (duplicate content)`)
+                } else {
+                  await updateReplyLog(pool, bot.id, failedReply.article_link, { success: ok, aiContent: aiContent || failedReply.ai_content })
+                  console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Retry succeeded' : '❌ Retry failed'}`)
+                }
               }
-              const hasContent = !!failedReply.ai_content
-              console.log(`[Bot ${bot.ptt_id}] Retrying: "${failedReply.article_title}" (${hasContent ? 'reuse content' : 'regenerate'})`)
-              if (!hasContent) await waitForAiRateLimit()
-              const { ok, aiContent, skipped } = await replyWithBot(bot, article, {
-                preGeneratedContent: failedReply.ai_content || null,
-                onContentReady: hasContent ? null : async (content) => {
-                  if (await hasDuplicateContent(conn, bot.id, content)) {
-                    console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content on retry, skipping`)
+            } else {
+              const dailyLimit = topic.daily_limit ?? 5
+              const todayReplies = await countTodayBoardReplies(pool, bot.id, topic.board)
+              console.log(`[Bot ${bot.ptt_id}] Today's replies for ${topic.board}: ${todayReplies}/${dailyLimit}`)
+
+              if (todayReplies >= dailyLimit) {
+                console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${dailyLimit} 篇，跳過`)
+                return
+              }
+
+              let target = null
+              for (const article of sortedArticles) {
+                if (await hasReplied(pool, bot.id, article.link)) continue
+                const baseTitle = getBaseTitle(article.title)
+                if (await hasRepliedToSameThread(pool, bot.id, topic.board, baseTitle)) {
+                  console.log(`[Bot ${bot.ptt_id}] ⚠️ Same thread already replied: "${baseTitle}", skipping "${article.title}"`)
+                  continue
+                }
+                target = article
+                break
+              }
+
+              if (!target) {
+                console.log(`[Bot ${bot.ptt_id}] 沒有可回覆的新文章`)
+                return
+              }
+
+              console.log(`[Bot ${bot.ptt_id}] Replying to: "${target.title}" (push: ${target.push})`)
+
+              let capturedContent = null
+              const { ok, aiContent, skipped } = await replyWithBot(bot, target, {
+                aiRateLimiter: withAiRateLimit,
+                onContentReady: async (content) => {
+                  if (await hasDuplicateContent(pool, bot.id, content)) {
+                    console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content detected, skipping post`)
                     return false
                   }
-                  await updateReplyLog(conn, bot.id, failedReply.article_link, { success: false, aiContent: content })
+                  capturedContent = content
+                  await logReply(pool, bot.id, target.link, {
+                    board: topic.board,
+                    articleTitle: target.title,
+                    topicId: topic.id,
+                    success: false,
+                    aiContent: content,
+                  })
                 },
                 onPostDone: async () => {
-                  await updateReplyLog(conn, bot.id, failedReply.article_link, { success: true, aiContent: failedReply.ai_content })
+                  await updateReplyLog(pool, bot.id, target.link, { success: true, aiContent: capturedContent })
                   console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
                 },
               })
               if (skipped) {
-                console.log(`[Bot ${bot.ptt_id}] ⏭️ Retry skipped (duplicate content)`)
+                console.log(`[Bot ${bot.ptt_id}] ⏭️ Skipped (duplicate content)`)
               } else {
-                await updateReplyLog(conn, bot.id, failedReply.article_link, { success: ok, aiContent: aiContent || failedReply.ai_content })
-                console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Retry succeeded' : '❌ Retry failed'}`)
+                await updateReplyLog(pool, bot.id, target.link, { success: ok, aiContent })
+                console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Reply logged' : '❌ Reply failed, logged'}`)
               }
             }
-          } else {
-            // Normal path: pick a new article
-            const todayReplies = await countTodayBoardReplies(conn, bot.id, topic.board)
-            console.log(`[Bot ${bot.ptt_id}] Today's replies for ${topic.board}: ${todayReplies}/${DAILY_BOARD_LIMIT}`)
-
-            if (todayReplies >= DAILY_BOARD_LIMIT) {
-              console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${DAILY_BOARD_LIMIT} 篇，跳過`)
-              continue
-            }
-
-            const target = await (async () => {
-              for (const article of sortedArticles) {
-                if (claimedThisRun.has(article.link)) continue
-                if (await hasReplied(conn, bot.id, article.link)) continue
-                const baseTitle = getBaseTitle(article.title)
-                if (await hasRepliedToSameThread(conn, bot.id, topic.board, baseTitle)) {
-                  console.log(`[Bot ${bot.ptt_id}] ⚠️ Same thread already replied: "${baseTitle}", skipping "${article.title}"`)
-                  continue
-                }
-                return article
-              }
-              return null
-            })()
-
-            if (!target) {
-              console.log(`[Bot ${bot.ptt_id}] 沒有可回覆的新文章`)
-              continue
-            }
-
-            claimedThisRun.add(target.link)
-            console.log(`[Bot ${bot.ptt_id}] Replying to: "${target.title}" (push: ${target.push})`)
-
-            await waitForAiRateLimit()
-            let capturedContent = null
-            const { ok, aiContent, skipped } = await replyWithBot(bot, target, {
-              onContentReady: async (content) => {
-                if (await hasDuplicateContent(conn, bot.id, content)) {
-                  console.log(`[Bot ${bot.ptt_id}] ⚠️ Duplicate content detected, skipping post`)
-                  return false
-                }
-                capturedContent = content
-                await logReply(conn, bot.id, target.link, {
-                  board: topic.board,
-                  articleTitle: target.title,
-                  topicId: topic.id,
-                  success: false,
-                  aiContent: content,
-                })
-              },
-              onPostDone: async () => {
-                await updateReplyLog(conn, bot.id, target.link, { success: true, aiContent: capturedContent })
-                console.log(`[Bot ${bot.ptt_id}] ✅ Post confirmed on PTT, DB updated`)
-              },
-            })
-            if (skipped) {
-              console.log(`[Bot ${bot.ptt_id}] ⏭️ Skipped (duplicate content)`)
-            } else {
-              await updateReplyLog(conn, bot.id, target.link, { success: ok, aiContent })
-              console.log(`[Bot ${bot.ptt_id}] ${ok ? '✅ Reply logged' : '❌ Reply failed, logged'}`)
-            }
+          } catch (err) {
+            console.error(`[Bot ${bot.ptt_id}] Error:`, err.message)
+          } finally {
+            runningBots.delete(bot.id)
           }
-        }
+        }))
       } catch (err) {
         console.error(`[Topic ${topic.board}] Error, skipping:`, err.message)
       }
@@ -392,11 +542,11 @@ async function runWorkflow() {
 
     console.log(`\n✅ Workflow complete`)
   } finally {
-    await conn.end()
+    await pool.end()
   }
 }
 
-module.exports = { runWorkflow, initSchema, createConnection }
+module.exports = { runWorkflow, runCrawl, initSchema, createPool }
 
 if (require.main === module) {
   runWorkflow().catch(err => {

@@ -1,33 +1,44 @@
 // scheduler.js
 require('dotenv').config()
 const schedule = require('node-schedule')
-const { runWorkflow } = require('./workflow')
+const { runWorkflow, runCrawl } = require('./workflow')
 
-const cronExpr = process.env.CRON_SCHEDULE || '0 * * * *'
+const cronExpr  = process.env.CRON_SCHEDULE  || '*/30 * * * *'
+const crawlCron = process.env.CRAWL_SCHEDULE || '*/30 * * * *'
 
-let running = false
+const runningBots = new Set()
 
-const job = schedule.scheduleJob(cronExpr, async () => {
-  if (running) {
-    console.log(`[${new Date().toISOString()}] Previous run still in progress, skipping.`)
-    return
-  }
-  running = true
+const botJob = schedule.scheduleJob(cronExpr, async () => {
   console.log(`[${new Date().toISOString()}] Scheduled run starting...`)
   try {
-    await runWorkflow()
+    await runWorkflow(runningBots)
   } catch (err) {
     console.error(`[Scheduler] Error:`, err.message)
-  } finally {
-    running = false
   }
 })
 
-if (!job) {
-  console.error(`Invalid CRON_SCHEDULE: "${cronExpr}". Using default.`)
+let crawling = false
+const crawlJob = schedule.scheduleJob(crawlCron, async () => {
+  if (crawling) {
+    console.log(`[${new Date().toISOString()}] Crawl still in progress, skipping.`)
+    return
+  }
+  crawling = true
+  try {
+    await runCrawl()
+  } catch (err) {
+    console.error(`[Crawl] Error:`, err.message)
+  } finally {
+    crawling = false
+  }
+})
+
+if (!botJob || !crawlJob) {
+  console.error('Invalid cron expression in CRON_SCHEDULE or CRAWL_SCHEDULE.')
   process.exit(1)
 }
 
-console.log(`Scheduler started. Cron: "${cronExpr}"`)
-console.log(`Next fire: ${job.nextInvocation()}`)
+console.log(`Scheduler started.`)
+console.log(`  Bot cron:   "${cronExpr}"  → next: ${botJob.nextInvocation()}`)
+console.log(`  Crawl cron: "${crawlCron}" → next: ${crawlJob.nextInvocation()}`)
 console.log('Press Ctrl+C to stop.')
