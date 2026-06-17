@@ -11,7 +11,7 @@ jobs:
       - name: Deploy
         run: |
           set -e
-          DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/usr/bin/docker
+          DOCKER=docker
 
           echo "=== Git pull ==="
           $DOCKER run --rm \
