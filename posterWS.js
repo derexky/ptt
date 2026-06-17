@@ -528,8 +528,8 @@ class Poster {
       logMessage = 'Quitting unfinished article/draft.'
       handled = true
     } else if (chunk.includes(keywordMap.deleteLink)) {
-      writeInput = isDev ? keywordMap.input_No : keywordMap.input_Yes;
-      logMessage = `Handling existing link deletion (Input: ${isDev ? 'No' : 'Yes'}).`
+      writeInput = keywordMap.input_Yes
+      logMessage = 'Handling existing link deletion (Input: Yes).'
       handled = true
     }
 
