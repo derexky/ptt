@@ -6,36 +6,30 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - name: Deploy to QNAP NAS
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: 114.32.250.33
-          username: derexky
-          key: ${{ secrets.NAS_SSH_KEY }}
-          script: |
-            set -e
-            DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/usr/bin/docker
+      - name: Deploy
+        run: |
+          set -e
+          DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/usr/bin/docker
 
-            echo "=== Git pull ==="
-            $DOCKER run --rm \
-              -v /share/homes/derexky/.ssh/ptt_deploy_key:/root/ptt_deploy_key:ro \
-              -v /share/CACHEDEV1_DATA/ptt:/repo \
-              -e "GIT_SSH_COMMAND=ssh -i /root/ptt_deploy_key -o StrictHostKeyChecking=no" \
-              alpine/git -c safe.directory=/repo -C /repo pull
+          echo "=== Git pull ==="
+          $DOCKER run --rm \
+            -v /share/homes/derexky/.ssh/ptt_deploy_key:/root/ptt_deploy_key:ro \
+            -v /share/CACHEDEV1_DATA/ptt:/repo \
+            -e "GIT_SSH_COMMAND=ssh -i /root/ptt_deploy_key -o StrictHostKeyChecking=no" \
+            alpine/git -c safe.directory=/repo -C /repo pull
 
-            echo "=== Docker build ==="
-            DOCKER_BUILDKIT=0 $DOCKER build -t ptt-scheduler:latest /share/CACHEDEV1_DATA/ptt
+          echo "=== Docker build ==="
+          DOCKER_BUILDKIT=0 $DOCKER build -t ptt-scheduler:latest /share/CACHEDEV1_DATA/ptt
 
-            echo "=== Restart container ==="
-            $DOCKER rm -f ptt-scheduler 2>/dev/null || true
-            $DOCKER run -d --name ptt-scheduler \
-              --env-file /share/CACHEDEV1_DATA/ptt-scheduler.env \
-              ptt-scheduler:latest
+          echo "=== Restart container ==="
+          $DOCKER rm -f ptt-scheduler 2>/dev/null || true
+          $DOCKER run -d --name ptt-scheduler \
+            --env-file /share/CACHEDEV1_DATA/ptt-scheduler.env \
+            ptt-scheduler:latest
 
-            echo "=== Prune images ==="
-            $DOCKER image prune -f
+          echo "=== Prune images ==="
+          $DOCKER image prune -f
 
-            echo "=== Done ==="
-            $DOCKER ps --filter name=ptt-scheduler
+          $DOCKER ps --filter name=ptt-scheduler
