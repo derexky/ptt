@@ -1,6 +1,8 @@
 require('dotenv').config()
+const mysql = require('mysql2/promise')
+const config = require('./config')
 const { Poster } = require('./posterWS')
-const {readFile} = require('./helper')
+const { readFile } = require('./helper')
 const aliasMap = {
   b: 'board',
   s: 'subject',
@@ -12,6 +14,7 @@ const aliasMap = {
   c: 'category',
   i: 'id',
   w: 'password',
+  x: 'proxy',
 }
 
 const rawArgs = process.argv.slice(2)
@@ -51,18 +54,45 @@ const isNewPost = !!args.subject
 
 const isSendByWord = true
 
-function resolveCredentials() {
+async function resolveCredentials() {
   const id = args.id || process.env.PTT_ID
   const password = args.password || process.env.PTT_PASSWORD
   if (!id || !password) {
     console.error('❌ 缺少帳號密碼：請用 --id / --password 或設定 PTT_ID / PTT_PASSWORD 環境變數')
     process.exit(1)
   }
-  return { id, password }
+
+  // --proxy 或 PTT_PROXY 優先；否則從 DB 查 bots 關聯的 proxy
+  let proxyUrl = args.proxy || process.env.PTT_PROXY || null
+  if (!proxyUrl) {
+    let conn
+    try {
+      conn = await mysql.createConnection(config.mysql)
+      const [rows] = await conn.execute(
+        `SELECT p.host, p.port, p.username, p.password
+         FROM bots b
+         JOIN proxies p ON p.id = b.proxy_id AND p.is_active = TRUE
+         WHERE b.ptt_id = ? AND b.is_active = TRUE
+         LIMIT 1`,
+        [id]
+      )
+      if (rows.length > 0) {
+        const { host, port, username, password: pw } = rows[0]
+        proxyUrl = `http://${username}:${pw}@${host}:${port}`
+        console.log(`[DB] 使用 proxy: ${host}:${port}`)
+      }
+    } catch (e) {
+      console.warn(`[DB] 查詢 proxy 失敗，直連：${e.message}`)
+    } finally {
+      if (conn) await conn.end()
+    }
+  }
+
+  return { id, password, proxyUrl }
 }
 
 async function runPost() {
-  const { id, password } = resolveCredentials()
+  const { id, password, proxyUrl } = await resolveCredentials()
   const controller = new Poster(id, password)
   const draft = isNewPost && args.path ? readFile(args.path) : null
 
@@ -77,6 +107,7 @@ async function runPost() {
         isSendByWord,
         draft,
         isNeedBackup,
+        proxyUrl,
       })
       .catch((err) => {
         // 捕獲並記錄背景發文的最終錯誤

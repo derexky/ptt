@@ -15,6 +15,17 @@ function createPool() {
 
 async function initSchema(conn) {
   await conn.execute(`
+    CREATE TABLE IF NOT EXISTS proxies (
+      id        INT AUTO_INCREMENT PRIMARY KEY,
+      host      VARCHAR(100) NOT NULL,
+      port      INT NOT NULL,
+      username  VARCHAR(100),
+      password  VARCHAR(100),
+      label     VARCHAR(50),
+      is_active BOOLEAN DEFAULT TRUE
+    )
+  `)
+  await conn.execute(`
     CREATE TABLE IF NOT EXISTS bots (
       id         INT AUTO_INCREMENT PRIMARY KEY,
       ptt_id     VARCHAR(50) NOT NULL,
@@ -23,7 +34,8 @@ async function initSchema(conn) {
       tone       VARCHAR(200),
       is_active  BOOLEAN DEFAULT TRUE,
       start_hour TINYINT DEFAULT NULL,
-      end_hour   TINYINT DEFAULT NULL
+      end_hour   TINYINT DEFAULT NULL,
+      proxy_id   INT DEFAULT NULL
     )
   `)
   await conn.execute(`
@@ -84,6 +96,9 @@ async function initSchema(conn) {
     await conn.execute('ALTER TABLE bots ADD COLUMN start_hour TINYINT DEFAULT NULL')
     await conn.execute('ALTER TABLE bots ADD COLUMN end_hour TINYINT DEFAULT NULL')
   }
+  if (!botColSet.has('proxy_id')) {
+    await conn.execute('ALTER TABLE bots ADD COLUMN proxy_id INT DEFAULT NULL')
+  }
 
   const [topicCols] = await conn.execute('SHOW COLUMNS FROM topics')
   const topicColSet = new Set(topicCols.map(c => c.Field))
@@ -113,8 +128,12 @@ async function loadTopics(conn) {
 
 async function loadSubscribedBots(conn, topicId) {
   const [rows] = await conn.execute(
-    `SELECT b.* FROM bots b
+    `SELECT b.*,
+            p.host AS proxy_host, p.port AS proxy_port,
+            p.username AS proxy_user, p.password AS proxy_pass
+     FROM bots b
      JOIN bot_topic_subscriptions s ON s.bot_id = b.id
+     LEFT JOIN proxies p ON p.id = b.proxy_id AND p.is_active = TRUE
      WHERE s.topic_id = ? AND b.is_active = TRUE`,
     [topicId]
   )
@@ -290,6 +309,9 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
   }
 
   const stance = [bot.stance, bot.tone, '回覆內容500到800字之間'].filter(Boolean).join('\n')
+  const proxyUrl = bot.proxy_host
+    ? `http://${bot.proxy_user}:${bot.proxy_pass}@${bot.proxy_host}:${bot.proxy_port}`
+    : null
   const poster = new Poster(bot.ptt_id, bot.password)
   const makeTimeout = (ms, label) => new Promise((_, reject) =>
     setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
@@ -304,6 +326,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       board,
       aid,
       stance,
+      proxyUrl,
       isSendByWord: true,
       isNeedBackup: false,
       preGeneratedContent: preGeneratedContent || null,

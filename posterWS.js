@@ -864,6 +864,7 @@ class Poster {
       jobId: jobIdOpt,
       progressThrottleMs,
       progressMinPercentDelta,
+      proxyUrl,
     } = options
 
     this._onProgress = typeof onProgress === 'function' ? onProgress : null
@@ -904,14 +905,22 @@ class Poster {
       this.finalResolve = resolve
       this.finalReject = reject
 
+      const wsHeaders = {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
+      }
+      let wsRequestOptions = undefined
+      if (proxyUrl) {
+        const { HttpsProxyAgent } = require('https-proxy-agent')
+        wsRequestOptions = { agent: new HttpsProxyAgent(proxyUrl) }
+        console.log(`[Auto] Using proxy: ${proxyUrl}`)
+      }
       this.stream = new w3cwebsocket(
-        'wss://ws.ptt.cc/bbs',  // 參數 1: PTT WebSocket 網址
-        'bbs',                  // 參數 2: Protocol (通訊協定，設為 'bbs' 或 undefined)
-        'https://term.ptt.cc',  // 參數 3: Origin (來源偽裝)
-        {                       // Headers (表頭)
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7',
-        }
+        'wss://ws.ptt.cc/bbs',
+        'bbs',
+        'https://term.ptt.cc',
+        wsHeaders,
+        wsRequestOptions
       )
 
       this.stream.onopen = () => {
