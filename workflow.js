@@ -193,12 +193,12 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
     onPostDone,
   }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
 
-  const timeout = new Promise((_, reject) =>
+  const makeTimeout = () => new Promise((_, reject) =>
     setTimeout(() => reject(new Error(`Reply timeout after ${config.replyTimeoutMs / 60000} minutes`)), config.replyTimeoutMs)
   )
 
   try {
-    const result = await Promise.race([poster.contentReady, timeout])
+    const result = await Promise.race([poster.contentReady, makeTimeout()])
     const aiContent = String(result.content || result.text || '')
     console.log(`[Bot ${bot.ptt_id}] Content ready: "${aiContent.slice(0, 60)}..."`)
     if (onContentReady) {
@@ -209,7 +209,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       }
     }
     poster.continueState()
-    await Promise.race([postPromise, timeout])
+    await Promise.race([postPromise, makeTimeout()])
     return { ok: true, aiContent }
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
