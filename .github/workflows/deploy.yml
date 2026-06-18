@@ -13,12 +13,13 @@ jobs:
           set -e
           DOCKER=docker
 
-          echo "=== Git pull ==="
+          echo "=== Git fetch + reset ==="
           $DOCKER run --rm \
             -v /share/homes/derexky/.ssh/ptt_deploy_key:/root/ptt_deploy_key:ro \
             -v /share/CACHEDEV1_DATA/ptt:/repo \
             -e "GIT_SSH_COMMAND=ssh -i /root/ptt_deploy_key -o StrictHostKeyChecking=no" \
-            alpine/git -c safe.directory=/repo -C /repo pull
+            --entrypoint sh \
+            alpine/git -c "git -c safe.directory=/repo -C /repo fetch origin && git -c safe.directory=/repo -C /repo reset --hard origin/${GITHUB_REF_NAME}"
 
           echo "=== Docker build ==="
           DOCKER_BUILDKIT=0 $DOCKER build -t ptt-scheduler:latest /share/CACHEDEV1_DATA/ptt
