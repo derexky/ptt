@@ -238,6 +238,7 @@ async function countTodayBoardReplies(conn, botId, board) {
   const [rows] = await conn.execute(
     `SELECT COUNT(DISTINCT article_link) AS cnt FROM reply_log
      WHERE bot_id = ? AND article_link LIKE ?
+       AND success = TRUE
        AND DATE(replied_at + INTERVAL 8 HOUR) = DATE(NOW() + INTERVAL 8 HOUR)`,
     [botId, `%/bbs/${board}/%`]
   )
