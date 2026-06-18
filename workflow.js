@@ -444,6 +444,7 @@ async function runWorkflow(runningBots = new Set()) {
         console.log(`${sortedArticles.length} article(s) available for bots`)
 
         const twHour = (new Date().getUTCHours() + 8) % 24
+        const claimedLinks = new Set()
 
         await Promise.all(bots.map(async (bot) => {
           if (bot.start_hour !== null && bot.end_hour !== null) {
@@ -514,9 +515,15 @@ async function runWorkflow(runningBots = new Set()) {
 
               let target = null
               for (const article of sortedArticles) {
-                if (await hasReplied(pool, bot.id, article.link)) continue
+                if (claimedLinks.has(article.link)) continue
+                claimedLinks.add(article.link)
+                if (await hasReplied(pool, bot.id, article.link)) {
+                  claimedLinks.delete(article.link)
+                  continue
+                }
                 const baseTitle = getBaseTitle(article.title)
                 if (await hasRepliedToSameThread(pool, bot.id, topic.board, baseTitle)) {
+                  claimedLinks.delete(article.link)
                   console.log(`[Bot ${bot.ptt_id}] ⚠️ Same thread already replied: "${baseTitle}", skipping "${article.title}"`)
                   continue
                 }
