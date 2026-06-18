@@ -466,6 +466,12 @@ async function runWorkflow(runningBots = new Set()) {
             if (botFailedMap.has(bot.id)) {
               const failed = botFailedMap.get(bot.id)
               console.log(`[Bot ${bot.ptt_id}] ${failed.length} failed reply(s) to retry`)
+              const dailyLimit = topic.daily_limit ?? 5
+              const todayReplies = await countTodayBoardReplies(pool, bot.id, topic.board)
+              if (todayReplies >= dailyLimit) {
+                console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${dailyLimit} 篇，跳過 retry`)
+                return
+              }
               for (const failedReply of failed) {
                 const article = {
                   link: failedReply.article_link,
