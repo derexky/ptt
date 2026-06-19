@@ -1,12 +1,24 @@
 // scheduler.js
 require('dotenv').config()
 const schedule = require('node-schedule')
-const { runWorkflow, runCrawl, runScheduledPosts } = require('./workflow')
+const { runWorkflow, runCrawl, runScheduledPosts, initSchema, createPool } = require('./workflow')
 
 const crawlCron = process.env.CRAWL_SCHEDULE || '*/30 * * * *'
 const cronExpr  = process.env.CRON_SCHEDULE  || '10,40 * * * *'
 
 const runningBots = new Set()
+
+// Ensure all tables exist before any jobs fire
+;(async () => {
+  const pool = createPool()
+  try {
+    await initSchema(pool)
+  } catch (err) {
+    console.error('[Scheduler] initSchema failed:', err.message)
+  } finally {
+    await pool.end()
+  }
+})()
 
 const botJob = schedule.scheduleJob(cronExpr, async () => {
   console.log(`[${new Date().toISOString()}] Scheduled run starting...`)
