@@ -222,17 +222,6 @@ async function getTotalPages() {
 
     const $ = cheerio.load(response.data);
 
-    // Debug：輸出導航連結
-    const links = $(".btn-group-paging a");
-    console.log("導航連結文字列表：");
-    links.each((i, el) => {
-      console.log(
-        `  Link ${i}: "${$(el).text().trim()}" (href: ${
-          $(el).attr("href") || "無"
-        })`
-      )
-    })
-
     // 用 '上頁' 匹配
     const upperLink = $(".btn-group-paging a")
       .filter((i, el) => $(el).text().trim().includes("上頁"))
@@ -485,7 +474,7 @@ const parseArticle = (data) => {
     });
     return { articleIp, content, comments };
   } catch (e) {
-    throw `連結 ${link} 解析錯誤: ${e.message}`;
+    throw new Error(`parseArticle 解析錯誤: ${e.message}`);
   }
 }
 

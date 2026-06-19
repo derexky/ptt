@@ -533,7 +533,10 @@ async function runWorkflow(runningBots = new Set()) {
 
               let target = null
               for (const article of sortedArticles) {
-                if (claimedLinks.has(article.link)) continue
+                if (claimedLinks.has(article.link)) {
+                  console.log(`[Bot ${bot.ptt_id}] ⏭ 文章已被其他 bot 認領，跳過: "${article.title.substring(0, 30)}"`)
+                  continue
+                }
                 claimedLinks.add(article.link)
                 if (await hasReplied(pool, bot.id, article.link)) {
                   claimedLinks.delete(article.link)

@@ -688,7 +688,7 @@ class Poster {
         break
 
       case status.readArticle:
-        console.log(`\n[Auto] Read article`)
+        if (this.retryCount === 0) console.log('\n[Auto] Read article (scanning for URL...)')
 
         if (!chunk.toLowerCase().includes(`看板《${this.board.toLowerCase()}`)) {
           this.buffer += chunk
@@ -735,8 +735,10 @@ class Poster {
             return // 暫停；isProcessing 在 handleResolve 已清除
           }
         } else {
-          console.log('-> Reading...')
           this.retryCount++
+          if (this.retryCount === 1 || this.retryCount % 10 === 0) {
+            console.log(`-> Scrolling... (${this.retryCount}/100)`)
+          }
           if (this.retryCount >= 100) {
             console.error('\n[Auto] Failed to extract article link after retries.')
             throw new Error('Failed to extract article link.')
