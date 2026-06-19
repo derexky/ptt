@@ -313,7 +313,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
     return { ok: false, aiContent: null }
   }
 
-  const stance = [bot.stance, bot.tone, '回覆內容500到800字之間'].filter(Boolean).join('\n')
+  const stance = [bot.stance, bot.tone, '回覆內容至少800字以上'].filter(Boolean).join('\n')
   const proxyUrl = bot.proxy_host
     ? `http://${bot.proxy_user}:${bot.proxy_pass}@${bot.proxy_host}:${bot.proxy_port}`
     : null
