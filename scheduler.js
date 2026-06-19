@@ -1,7 +1,7 @@
 // scheduler.js
 require('dotenv').config()
 const schedule = require('node-schedule')
-const { runWorkflow, runCrawl } = require('./workflow')
+const { runWorkflow, runCrawl, runScheduledPosts } = require('./workflow')
 
 const crawlCron = process.env.CRAWL_SCHEDULE || '*/30 * * * *'
 const cronExpr  = process.env.CRON_SCHEDULE  || '10,40 * * * *'
@@ -30,6 +30,22 @@ const crawlJob = schedule.scheduleJob(crawlCron, async () => {
     console.error(`[Crawl] Error:`, err.message)
   } finally {
     crawling = false
+  }
+})
+
+let scheduledPosting = false
+schedule.scheduleJob('* * * * *', async () => {
+  if (scheduledPosting) {
+    console.log(`[ScheduledPost] Still in progress, skipping.`)
+    return
+  }
+  scheduledPosting = true
+  try {
+    await runScheduledPosts()
+  } catch (err) {
+    console.error(`[ScheduledPost] Error:`, err.message)
+  } finally {
+    scheduledPosting = false
   }
 })
 

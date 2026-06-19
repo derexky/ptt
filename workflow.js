@@ -5,6 +5,7 @@ const config = require('./config')
 const { crawlNewPosts } = require('./crawl')
 const { Poster } = require('./posterWS')
 const { keywordFilter, aiFilter } = require('./filter')
+const { generateContentByGoogle } = require('./ai')
 const { extractAid } = require('./helper')
 
 // ── DB ──────────────────────────────────────────────────────────────
@@ -119,6 +120,24 @@ async function initSchema(conn) {
   for (const [col, sql] of migrations) {
     if (!colSet.has(col)) await conn.execute(sql)
   }
+
+  await conn.execute(`
+    CREATE TABLE IF NOT EXISTS scheduled_posts (
+      id           INT AUTO_INCREMENT PRIMARY KEY,
+      bot_id       INT NOT NULL,
+      board        VARCHAR(50) NOT NULL,
+      title        VARCHAR(200) NOT NULL,
+      category     INT DEFAULT 1,
+      content      TEXT DEFAULT NULL,
+      ai_prompt    TEXT DEFAULT NULL,
+      scheduled_at DATETIME NOT NULL,
+      status       ENUM('pending','done','failed') DEFAULT 'pending',
+      posted_at    DATETIME DEFAULT NULL,
+      error_msg    TEXT DEFAULT NULL,
+      FOREIGN KEY (bot_id) REFERENCES bots(id)
+    )
+  `)
+
   console.log('✅ Schema initialised')
 }
 
@@ -364,6 +383,109 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
   }
 }
 
+// ── Scheduled posts ──────────────────────────────────────────────────
+
+async function runScheduledPosts() {
+  const pool = createPool()
+  try {
+    const [posts] = await pool.execute(
+      `SELECT sp.*,
+              b.ptt_id, b.password,
+              p.host AS proxy_host, p.port AS proxy_port,
+              p.username AS proxy_user, p.password AS proxy_pass
+       FROM scheduled_posts sp
+       JOIN bots b ON b.id = sp.bot_id AND b.is_active = TRUE
+       LEFT JOIN proxies p ON p.id = b.proxy_id AND p.is_active = TRUE
+       WHERE sp.status = 'pending' AND sp.scheduled_at <= UTC_TIMESTAMP()`
+    )
+
+    if (posts.length === 0) return
+
+    console.log(`[ScheduledPost] ${posts.length} post(s) due`)
+
+    for (const post of posts) {
+      const [upd] = await pool.execute(
+        `UPDATE scheduled_posts SET status = 'done' WHERE id = ? AND status = 'pending'`,
+        [post.id]
+      )
+      if (upd.affectedRows === 0) {
+        console.log(`[ScheduledPost ${post.id}] Already claimed, skipping`)
+        continue
+      }
+
+      const isDryRun = process.env.DRY_RUN === 'true'
+      if (isDryRun) {
+        console.log(`[ScheduledPost ${post.id}] DRY_RUN: would post "${post.title}" to ${post.board}, skipping`)
+        await pool.execute(
+          `UPDATE scheduled_posts SET status = 'pending' WHERE id = ?`,
+          [post.id]
+        )
+        continue
+      }
+
+      try {
+        let content = post.content
+        if (!content) {
+          if (!post.ai_prompt) {
+            throw new Error('Neither content nor ai_prompt is set')
+          }
+          console.log(`[ScheduledPost ${post.id}] Generating AI content...`)
+          const aiResult = await withAiRateLimit(() => generateContentByGoogle({ prompt: post.ai_prompt }))
+          if (!aiResult || !aiResult.success) {
+            throw new Error(aiResult?.message || 'AI returned empty content')
+          }
+          content = aiResult.value
+        }
+
+        const proxyUrl = post.proxy_host
+          ? `http://${post.proxy_user}:${post.proxy_pass}@${post.proxy_host}:${post.proxy_port}`
+          : null
+
+        const poster = new Poster(post.ptt_id, post.password)
+
+        const makeTimeout = (ms, label) => new Promise((_, reject) =>
+          setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
+        )
+
+        const postPromise = poster.postArticle({
+          board: post.board,
+          title: post.title,
+          category: post.category ?? 1,
+          preGeneratedContent: content,
+          isSendByWord: true,
+          isNeedBackup: false,
+          proxyUrl,
+        }).catch(err => {
+          console.error(`[ScheduledPost ${post.id}] Background error:`, err.message)
+          throw err
+        })
+
+        await Promise.race([
+          poster.contentReady,
+          postPromise,
+          makeTimeout(100_000, 'content not ready within 100s'),
+        ])
+        poster.continueState()
+        await postPromise
+
+        await pool.execute(
+          `UPDATE scheduled_posts SET posted_at = UTC_TIMESTAMP() WHERE id = ?`,
+          [post.id]
+        )
+        console.log(`[ScheduledPost ${post.id}] ✅ Posted successfully`)
+      } catch (err) {
+        console.error(`[ScheduledPost ${post.id}] ❌ Failed:`, err.message)
+        await pool.execute(
+          `UPDATE scheduled_posts SET status = 'failed', error_msg = ? WHERE id = ?`,
+          [err.message.slice(0, 500), post.id]
+        )
+      }
+    }
+  } finally {
+    await pool.end()
+  }
+}
+
 // ── Crawl job ────────────────────────────────────────────────────────
 
 async function runCrawl() {
@@ -604,7 +726,7 @@ async function runWorkflow(runningBots = new Set()) {
   }
 }
 
-module.exports = { runWorkflow, runCrawl, initSchema, createPool }
+module.exports = { runWorkflow, runCrawl, runScheduledPosts, initSchema, createPool }
 
 if (require.main === module) {
   runWorkflow().catch(err => {
