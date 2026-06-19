@@ -246,8 +246,9 @@ class Poster {
       readline.cursorTo(process.stdout, 0)
       process.stdout.write(`\r[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
       if (current === total) process.stdout.write('\n')
-    } else {
+    } else if (current === total || progress - (this._lastPostingLogPercent ?? -25) >= 25) {
       console.log(`[Auto] Posting (${type}) Progress: ${progress}% (${current}/${total})`)
+      this._lastPostingLogPercent = progress
     }
 
     const immediate = current === total || progress >= 100

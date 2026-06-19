@@ -95,38 +95,17 @@ async function insertArticle(article, { skipContent = false } = {}) {
       result.insertId === 0 && result.changedRows === 0;
 
     if (isNew) {
-      console.log(
-        `✅ 新增文章: ${article.title.substring(0, 20)}... (push: ${
-          article.push
-        })`
-      );
+      console.log(`✅ 新增文章: ${article.title.substring(0, 20)}... (push: ${article.push})`);
     } else if (isUpdated) {
-      console.log(
-        `🔄 更新文章 push/title: ${article.title.substring(
-          0,
-          20
-        )}... (新 push: ${article.push})`
-      );
-    } else if (isDuplicateNoChange) {
-      // 這是最常見的結果，表示文章已存在，但推文數等未變動
-      console.log(
-        `⭕ 檢查無須更新: ${article.title.substring(0, 20)}... (push: ${
-          article.push
-        })`
-      );
-    } else {
-      // 處理其他極端情況，雖然不常見
-      console.log(
-        `⚠️ 意外結果 (affectedRows: ${
-          result.affectedRows
-        }): ${article.title.substring(0, 20)}...`
-      );
+      console.log(`🔄 更新文章: ${article.title.substring(0, 20)}... (push: ${article.push})`);
+    } else if (!isDuplicateNoChange) {
+      console.log(`⚠️ 意外結果 (affectedRows: ${result.affectedRows}): ${article.title.substring(0, 20)}...`);
     }
     if (!skipContent) await crawlContentAndComments(result.insertId, article.link);
-    return isNew || isUpdated;
+    return { isNew, isUpdated };
   } catch (err) {
     console.error(`插入錯誤: ${err.message}`);
-    return false;
+    return { isNew: false, isUpdated: false };
   }
 }
 
@@ -285,6 +264,7 @@ async function crawlSinglePage(pageNum, { skipContent = false } = {}) {
     const $ = cheerio.load(response.data)
     const posts = $(".r-ent");
     const articleList = [];
+    let newCount = 0, updatedCount = 0;
 
     // 改用 for...of + await 確保插入順序
     for (let index = 0; index < posts.length; index++) {
@@ -319,13 +299,14 @@ async function crawlSinglePage(pageNum, { skipContent = false } = {}) {
         link: `https://www.ptt.cc${link}`,
       }
 
-      await insertArticle(article, { skipContent })
+      const { isNew, isUpdated } = await insertArticle(article, { skipContent })
+      if (isNew) newCount++
+      if (isUpdated) updatedCount++
       articleList.push(article)
     }
 
-    console.log(
-      `第 ${pageNum} 頁完成，抓到 ${articleList.length} 篇文章（已插入 DB）。`
-    );
+    const unchanged = articleList.length - newCount - updatedCount;
+    console.log(`第 ${pageNum ?? '首'} 頁完成：${articleList.length} 篇（新增 ${newCount}，更新 ${updatedCount}，無變化 ${unchanged}）`);
     return articleList
   } catch (error) {
     console.error(`第 ${pageNum} 頁爬取錯誤: ${error.message}`)
