@@ -408,14 +408,14 @@ async function runScheduledPosts() {
 
     console.log(`[ScheduledPost] ${posts.length} post(s) due`)
 
-    for (const post of posts) {
+    await Promise.all(posts.map(async post => {
       const [upd] = await pool.execute(
         `UPDATE scheduled_posts SET status = 'processing' WHERE id = ? AND status = 'pending'`,
         [post.id]
       )
       if (upd.affectedRows === 0) {
         console.log(`[ScheduledPost ${post.id}] Already claimed, skipping`)
-        continue
+        return
       }
 
       const isDryRun = process.env.DRY_RUN === 'true'
@@ -425,7 +425,7 @@ async function runScheduledPosts() {
           `UPDATE scheduled_posts SET status = 'pending' WHERE id = ?`,
           [post.id]
         )
-        continue
+        return
       }
 
       try {
@@ -485,7 +485,7 @@ async function runScheduledPosts() {
           [err.message.slice(0, 500), post.id]
         )
       }
-    }
+    }))
   } finally {
     await pool.end()
   }
