@@ -381,7 +381,7 @@ class Poster {
     }
     const rnd = getRandomInt(35, 65)
     const text = divideParagraph(rawText, rnd)
-    if (text.length <= config.postMaxChars) return text
+    if (isDev || text.length <= config.postMaxChars) return text
     const cut = text.slice(0, config.postMaxChars)
     const lastEnd = Math.max(...['。', '！', '？', '…'].map(c => cut.lastIndexOf(c)))
     if (lastEnd > 0) return cut.slice(0, lastEnd + 1).trimEnd()
