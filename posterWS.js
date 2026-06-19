@@ -737,7 +737,7 @@ class Poster {
         } else {
           console.log('-> Reading...')
           this.retryCount++
-          if (this.retryCount >= 30) {
+          if (this.retryCount >= 100) {
             console.error('\n[Auto] Failed to extract article link after retries.')
             throw new Error('Failed to extract article link.')
           }

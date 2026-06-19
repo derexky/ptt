@@ -114,6 +114,7 @@ async function initSchema(conn) {
     ['topic_id',      'ALTER TABLE reply_log ADD COLUMN topic_id INT'],
     ['success',       'ALTER TABLE reply_log ADD COLUMN success BOOLEAN DEFAULT TRUE'],
     ['ai_content',    'ALTER TABLE reply_log ADD COLUMN ai_content TEXT'],
+    ['retry_count',   'ALTER TABLE reply_log ADD COLUMN retry_count INT DEFAULT 0'],
   ]
   for (const [col, sql] of migrations) {
     if (!colSet.has(col)) await conn.execute(sql)
@@ -165,19 +166,22 @@ async function logReply(conn, botId, articleLink, { board, articleTitle, topicId
   )
 }
 
+const MAX_RETRY_COUNT = 3
+
 async function getFailedReplies(conn, botId, board) {
   const [rows] = await conn.execute(
-    `SELECT article_link, article_title, ai_content FROM reply_log
-     WHERE bot_id = ? AND board = ? AND success = FALSE
+    `SELECT article_link, article_title, ai_content, retry_count FROM reply_log
+     WHERE bot_id = ? AND board = ? AND success = FALSE AND retry_count < ?
      ORDER BY replied_at DESC`,
-    [botId, board]
+    [botId, board, MAX_RETRY_COUNT]
   )
   return rows
 }
 
 async function updateReplyLog(conn, botId, articleLink, { success, aiContent }) {
+  const incrementRetry = success === false ? ', retry_count = retry_count + 1' : ''
   await conn.execute(
-    `UPDATE reply_log SET success = ?, ai_content = ?, replied_at = NOW()
+    `UPDATE reply_log SET success = ?, ai_content = ?, replied_at = NOW()${incrementRetry}
      WHERE bot_id = ? AND article_link = ?`,
     [success ?? false, aiContent ?? null, botId, articleLink]
   )
