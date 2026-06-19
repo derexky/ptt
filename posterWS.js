@@ -694,9 +694,11 @@ class Poster {
           this.buffer += chunk
         }
 
-        match = chunk.match(
-          /文章網址\s*:\s*(https?:\/\/www\.ptt\.cc\/bbs\/[^\/]+\/M\.\d+\.[A-Z]\.\w+\.html)/i
-        )
+        const stripAnsi = s => s.replace(/\x1b\[\d{0,3}(?:;\d{1,3})*[A-Za-zKmlH]/g, '')
+        const cleanChunk = stripAnsi(chunk)
+        const urlRegex = /文章網址\s*:\s*(https?:\/\/www\.ptt\.cc\/bbs\/[^\/]+\/M\.\d+\.[A-Z]\.\w+\.html)/i
+        const cleanTail = stripAnsi(this.buffer.slice(-500))
+        match = cleanChunk.match(urlRegex) || cleanTail.match(urlRegex)
         if (match) {
           const link = match[1]
           console.log(`\n[Auto] Get link, ${link}...`)
@@ -737,9 +739,9 @@ class Poster {
         } else {
           this.retryCount++
           if (this.retryCount === 1 || this.retryCount % 10 === 0) {
-            console.log(`-> Scrolling... (${this.retryCount}/100)`)
+            console.log(`-> Scrolling... (${this.retryCount}/30)`)
           }
-          if (this.retryCount >= 100) {
+          if (this.retryCount >= 30) {
             console.error('\n[Auto] Failed to extract article link after retries.')
             throw new Error('Failed to extract article link.')
           }
