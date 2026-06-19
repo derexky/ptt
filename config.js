@@ -1,6 +1,6 @@
 // --- 設定 ---
 module.exports = {
-postMinDelayMs: 1001,     // ms — PTT requires ≥1s per char to earn P coins
+    postMinDelayMs: 1001,     // ms — PTT requires ≥1s per char to earn P coins
     postMaxDelayMs: 1050,     // ms — upper bound for per-char random delay
     postMaxChars: 900,        // max AI content chars before sentence-boundary truncation
     // MySQL 連接設定（請根據環境修改）
