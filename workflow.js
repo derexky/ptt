@@ -440,6 +440,10 @@ async function runScheduledPosts() {
             throw new Error(aiResult?.message || 'AI returned empty content')
           }
           content = aiResult.value
+          await pool.execute(
+            `UPDATE scheduled_posts SET content = ? WHERE id = ?`,
+            [content, post.id]
+          )
         }
 
         const proxyUrl = post.proxy_host
