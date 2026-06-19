@@ -386,8 +386,8 @@ async function runCrawl() {
 
 // ── Main workflow ─────────────────────────────────────────────────────
 
-const INTER_TOPIC_DELAY_MS  = parseInt(process.env.INTER_TOPIC_DELAY_MS  || '300000')  // 5 min between boards
-const INTER_BOT_STAGGER_MS  = parseInt(process.env.INTER_BOT_STAGGER_MS  || '180000')  // 3 min between bots
+const INTER_TOPIC_DELAY_MS  = parseInt(process.env.INTER_TOPIC_DELAY_MS  || '60000')   // 1 min between boards
+const INTER_BOT_STAGGER_MS  = parseInt(process.env.INTER_BOT_STAGGER_MS  || '30000')   // 30s between bots
 
 async function runWorkflow(runningBots = new Set()) {
   console.log(`\n[${new Date().toISOString()}] Starting workflow...`)
@@ -402,7 +402,7 @@ async function runWorkflow(runningBots = new Set()) {
 
     for (let topicIdx = 0; topicIdx < topics.length; topicIdx++) {
       if (topicIdx > 0) {
-        console.log(`⏳ Waiting ${INTER_TOPIC_DELAY_MS / 60000} min before next board...`)
+        console.log(`⏳ Waiting ${INTER_TOPIC_DELAY_MS / 1000}s before next board...`)
         await sleep(INTER_TOPIC_DELAY_MS)
       }
       const topic = topics[topicIdx]
@@ -460,7 +460,7 @@ async function runWorkflow(runningBots = new Set()) {
 
         for (let botIdx = 0; botIdx < bots.length; botIdx++) {
           if (botIdx > 0) {
-            console.log(`⏳ Waiting ${INTER_BOT_STAGGER_MS / 60000} min before next bot...`)
+            console.log(`⏳ Waiting ${INTER_BOT_STAGGER_MS / 1000}s before next bot...`)
             await sleep(INTER_BOT_STAGGER_MS)
           }
           const bot = bots[botIdx]
