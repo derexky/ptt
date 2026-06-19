@@ -28,6 +28,7 @@ jobs:
           $DOCKER rm -f ptt-scheduler 2>/dev/null || true
           $DOCKER run -d --name ptt-scheduler \
             --network ptt-net \
+            --restart unless-stopped \
             --env-file /share/CACHEDEV1_DATA/ptt-scheduler.env \
             ptt-scheduler:latest
 
