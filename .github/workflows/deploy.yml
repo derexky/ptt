@@ -2,7 +2,7 @@ name: Deploy to myhost
 
 on:
   push:
-    branches: [feature/test, main]
+    branches: [main]
 
 jobs:
   deploy:
@@ -27,6 +27,7 @@ jobs:
           echo "=== Restart container ==="
           $DOCKER rm -f ptt-scheduler 2>/dev/null || true
           $DOCKER run -d --name ptt-scheduler \
+            --network ptt-net \
             --env-file /share/CACHEDEV1_DATA/ptt-scheduler.env \
             ptt-scheduler:latest
 
