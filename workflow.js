@@ -131,12 +131,17 @@ async function initSchema(conn) {
       content      TEXT DEFAULT NULL,
       ai_prompt    TEXT DEFAULT NULL,
       scheduled_at DATETIME NOT NULL,
-      status       ENUM('pending','done','failed') DEFAULT 'pending',
+      status       ENUM('pending','processing','done','failed') DEFAULT 'pending',
       posted_at    DATETIME DEFAULT NULL,
       error_msg    TEXT DEFAULT NULL,
       FOREIGN KEY (bot_id) REFERENCES bots(id)
     )
   `)
+
+  const [spCols] = await conn.execute('SHOW COLUMNS FROM scheduled_posts LIKE \'status\'')
+  if (spCols.length > 0 && !spCols[0].Type.includes('processing')) {
+    await conn.execute(`ALTER TABLE scheduled_posts MODIFY COLUMN status ENUM('pending','processing','done','failed') DEFAULT 'pending'`)
+  }
 
   console.log('✅ Schema initialised')
 }
@@ -405,7 +410,7 @@ async function runScheduledPosts() {
 
     for (const post of posts) {
       const [upd] = await pool.execute(
-        `UPDATE scheduled_posts SET status = 'done' WHERE id = ? AND status = 'pending'`,
+        `UPDATE scheduled_posts SET status = 'processing' WHERE id = ? AND status = 'pending'`,
         [post.id]
       )
       if (upd.affectedRows === 0) {
@@ -469,7 +474,7 @@ async function runScheduledPosts() {
         await postPromise
 
         await pool.execute(
-          `UPDATE scheduled_posts SET posted_at = UTC_TIMESTAMP() WHERE id = ?`,
+          `UPDATE scheduled_posts SET status = 'done', posted_at = UTC_TIMESTAMP() WHERE id = ?`,
           [post.id]
         )
         console.log(`[ScheduledPost ${post.id}] ✅ Posted successfully`)
