@@ -383,6 +383,9 @@ async function runCrawl() {
 
 // ── Main workflow ─────────────────────────────────────────────────────
 
+const INTER_TOPIC_DELAY_MS  = parseInt(process.env.INTER_TOPIC_DELAY_MS  || '300000')  // 5 min between boards
+const INTER_BOT_STAGGER_MS  = parseInt(process.env.INTER_BOT_STAGGER_MS  || '180000')  // 3 min between bots
+
 async function runWorkflow(runningBots = new Set()) {
   console.log(`\n[${new Date().toISOString()}] Starting workflow...`)
   const pool = createPool()
@@ -394,7 +397,12 @@ async function runWorkflow(runningBots = new Set()) {
     if (topics.length === 0) { console.log('No active topics.'); return }
     console.log(`Loaded ${topics.length} topic(s)`)
 
-    for (const topic of topics) {
+    for (let topicIdx = 0; topicIdx < topics.length; topicIdx++) {
+      if (topicIdx > 0) {
+        console.log(`⏳ Waiting ${INTER_TOPIC_DELAY_MS / 60000} min before next board...`)
+        await sleep(INTER_TOPIC_DELAY_MS)
+      }
+      const topic = topics[topicIdx]
       console.log(`\n📋 Topic: board=${topic.board} keywords=${JSON.stringify(topic.keywords)}`)
 
       try {
@@ -447,20 +455,25 @@ async function runWorkflow(runningBots = new Set()) {
         const twHour = (new Date().getUTCHours() + 8) % 24
         const claimedLinks = new Set()
 
-        await Promise.all(bots.map(async (bot) => {
+        for (let botIdx = 0; botIdx < bots.length; botIdx++) {
+          if (botIdx > 0) {
+            console.log(`⏳ Waiting ${INTER_BOT_STAGGER_MS / 60000} min before next bot...`)
+            await sleep(INTER_BOT_STAGGER_MS)
+          }
+          const bot = bots[botIdx]
           if (bot.start_hour !== null && bot.end_hour !== null) {
             const inWindow = bot.start_hour <= bot.end_hour
               ? twHour >= bot.start_hour && twHour < bot.end_hour
               : twHour >= bot.start_hour || twHour < bot.end_hour
             if (!inWindow) {
               console.log(`[Bot ${bot.ptt_id}] 目前 ${twHour} 點不在啟動時段 ${bot.start_hour}-${bot.end_hour}，跳過`)
-              return
+              continue
             }
           }
 
           if (runningBots.has(bot.id)) {
             console.log(`[Bot ${bot.ptt_id}] 上一輪尚未完成，跳過`)
-            return
+            continue
           }
 
           runningBots.add(bot.id)
@@ -472,7 +485,7 @@ async function runWorkflow(runningBots = new Set()) {
               const todayReplies = await countTodayBoardReplies(pool, bot.id, topic.board)
               if (todayReplies >= dailyLimit) {
                 console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${dailyLimit} 篇，跳過 retry`)
-                return
+                continue
               }
               for (const failedReply of failed) {
                 const article = {
@@ -511,7 +524,7 @@ async function runWorkflow(runningBots = new Set()) {
 
               if (todayReplies >= dailyLimit) {
                 console.log(`[Bot ${bot.ptt_id}] 已達今日上限 ${dailyLimit} 篇，跳過`)
-                return
+                continue
               }
 
               let target = null
@@ -534,7 +547,7 @@ async function runWorkflow(runningBots = new Set()) {
 
               if (!target) {
                 console.log(`[Bot ${bot.ptt_id}] 沒有可回覆的新文章`)
-                return
+                continue
               }
 
               console.log(`[Bot ${bot.ptt_id}] Replying to: "${target.title}" (push: ${target.push})`)
@@ -573,7 +586,7 @@ async function runWorkflow(runningBots = new Set()) {
           } finally {
             runningBots.delete(bot.id)
           }
-        }))
+        }
       } catch (err) {
         console.error(`[Topic ${topic.board}] Error, skipping:`, err.message)
       }
