@@ -86,6 +86,15 @@ async function initSchema(conn) {
     )
   `)
 
+  try {
+    const [articleCols] = await conn.execute('SHOW COLUMNS FROM articles')
+    if (!new Set(articleCols.map(c => c.Field)).has('created_at')) {
+      await conn.execute('ALTER TABLE articles ADD COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP')
+    }
+  } catch (e) {
+    if (e.code !== 'ER_NO_SUCH_TABLE') throw e
+  }
+
   const [aiCols] = await conn.execute('SHOW COLUMNS FROM article_topic_ai_result')
   if (!new Set(aiCols.map(c => c.Field)).has('push_at_cache')) {
     await conn.execute('ALTER TABLE article_topic_ai_result ADD COLUMN push_at_cache INT DEFAULT 0')
@@ -255,8 +264,13 @@ async function getSelectedArticles(conn, topicId) {
      FROM articles a
      JOIN article_topic_ai_result r ON r.article_id = a.id
      WHERE r.topic_id = ? AND r.selected = TRUE
+       AND (
+         (a.created_at IS NOT NULL AND a.created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR))
+         OR
+         (a.created_at IS NULL AND TRIM(a.date) = DATE_FORMAT(CONVERT_TZ(NOW(), '+00:00', '+08:00'), '%c/%e'))
+       )
      ORDER BY a.id DESC LIMIT 100`,
-    [topicId]
+    [topicId, ARTICLE_MAX_AGE_HOURS]
   )
   return rows
 }
@@ -519,6 +533,7 @@ async function runCrawl() {
 
 const INTER_TOPIC_DELAY_MS  = parseInt(process.env.INTER_TOPIC_DELAY_MS  || '60000')   // 1 min between boards
 const INTER_BOT_STAGGER_MS  = parseInt(process.env.INTER_BOT_STAGGER_MS  || '30000')   // 30s between bots
+const ARTICLE_MAX_AGE_HOURS = parseInt(process.env.ARTICLE_MAX_AGE_HOURS || '48') || 48
 
 async function runWorkflow(runningBots = new Set()) {
   console.log(`\n[${new Date().toISOString()}] Starting workflow...`)
