@@ -79,8 +79,34 @@ async function refresh() {
       deactivated = result.affectedRows
     }
 
+    // 將使用到停用 proxy 的 bot 重新分配給未被使用的活躍 proxy
+    const [affectedBots] = await conn.execute(
+      `SELECT b.id AS bot_id FROM bots b
+       JOIN proxies p ON p.id = b.proxy_id
+       WHERE p.is_active = FALSE`
+    )
+    let reassigned = 0
+    if (affectedBots.length > 0) {
+      const [unusedProxies] = await conn.execute(
+        `SELECT p.id FROM proxies p
+         WHERE p.is_active = TRUE
+         AND p.id NOT IN (SELECT proxy_id FROM bots WHERE proxy_id IS NOT NULL AND is_active = TRUE)
+         ORDER BY p.id`
+      )
+      for (const bot of affectedBots) {
+        const proxy = unusedProxies.shift()
+        if (!proxy) break
+        await conn.execute('UPDATE bots SET proxy_id = ? WHERE id = ?', [proxy.id, bot.bot_id])
+        reassigned++
+      }
+      const unhandled = affectedBots.length - reassigned
+      if (unhandled > 0) {
+        console.warn(`⚠️  ${unhandled} 個 bot 無可用 proxy 分配，仍指向停用的 proxy`)
+      }
+    }
+
     const [rows] = await conn.execute('SELECT id, host, port, label, is_active FROM proxies ORDER BY id')
-    console.log(`\n✅ 更新 ${updated} 筆，新增 ${inserted} 筆，停用 ${deactivated} 筆`)
+    console.log(`\n✅ 更新 ${updated} 筆，新增 ${inserted} 筆，停用 ${deactivated} 筆，重新分配 bot ${reassigned} 個`)
     console.table(rows)
   } finally {
     await conn.end()
