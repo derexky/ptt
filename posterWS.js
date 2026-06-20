@@ -106,6 +106,7 @@ class Poster {
     this.target = null
     this.stance = null
     this.category = 1
+    this.rawFormat = false
     this.isNeedBackup = false
     /** WSS 在雲端常把一屏切成多個 frame，單包可能不含完整《看板》字樣 */
     this.onBoardScreenBuf = ''
@@ -486,7 +487,9 @@ class Poster {
 
   getAiText = async (drift) => {
     if (this.preGeneratedContent) {
-      return divideParagraph(this.preGeneratedContent, getRandomInt(35, 65))
+      return this.rawFormat
+        ? this.preGeneratedContent
+        : divideParagraph(this.preGeneratedContent, getRandomInt(35, 65))
     }
     const prompt = drift +
       '\r\n根據前述內容延伸並發表看法,\r\n回覆的文章不要包括上述內容的引文和推文,\r\n也不需要作者,看板,標題,時間的格式化部分'
@@ -503,6 +506,10 @@ class Poster {
       } else {
         throw new Error(aiContent.message)
       }
+    }
+    if (this.rawFormat) {
+      const text = rawText || ''
+      return text.length <= config.postMaxChars ? text : text.slice(0, config.postMaxChars)
     }
     const rnd = getRandomInt(35, 65)
     const text = divideParagraph(rawText, rnd)
@@ -918,6 +925,7 @@ class Poster {
     this.preGeneratedContent = options.preGeneratedContent || null
 
     this.isSendByWord = !!isSendByWord
+    this.rawFormat = !!options.rawFormat
     this.isNeedBackup = !!isNeedBackup
     this.dryRun = !!dryRun
 

@@ -15,6 +15,7 @@ const aliasMap = {
   i: 'id',
   w: 'password',
   x: 'proxy',
+  R: 'raw',
 }
 
 const rawArgs = process.argv.slice(2)
@@ -97,6 +98,11 @@ async function runPost() {
   const controller = new Poster(id, password)
   const draft = isNewPost && args.path ? readFile(args.path) : null
 
+  if (isNewPost && args.path && !draft) {
+    console.error(`❌ 無法讀取內容檔案: ${args.path}`)
+    process.exit(1)
+  }
+
   const _ = controller
       .postArticle({
         board: args.board,
@@ -107,6 +113,7 @@ async function runPost() {
         target: args.target,
         isSendByWord,
         draft,
+        rawFormat: !!args.raw,
         isNeedBackup,
         dryRun: isDryRun,
         proxyUrl,
