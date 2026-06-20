@@ -360,7 +360,8 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
     setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
   )
   const CONTENT_TIMEOUT_MS = 100_000        // 100s：登入 + AI 生成
-  const POST_PHASE_TIMEOUT_MS = 20 * 60_000 // 20min：900字 × 1s/字 ≈ 15min 加緩衝
+  const isDev = process.env.NODE_ENV === 'develop'
+  const POST_PHASE_TIMEOUT_MS = isDev ? 30 * 60_000 : 15 * 60_000 // dev: 30min, prod: 15min
 
   // Starts postArticle (triggers AI) and waits for content to be ready.
   // Runs inside aiRateLimiter so the AI call is serialised; postPromise continues after.
@@ -495,7 +496,7 @@ async function runScheduledPosts() {
         poster.continueState()
         await Promise.race([
           postPromise,
-          makeTimeout(20 * 60_000, 'posting phase timed out after resume'),
+          makeTimeout(POST_PHASE_TIMEOUT_MS, 'posting phase timed out after resume'),
         ]).catch(err => { poster.abort(); throw err })
 
         await pool.execute(
