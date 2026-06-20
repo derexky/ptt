@@ -351,7 +351,8 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
     return { ok: false, aiContent: null }
   }
 
-  const stance = [bot.stance, bot.tone, '回覆內容至少800字以上'].filter(Boolean).join('\n')
+  const antiAiRules = '回覆內容至少800字以上。不要介紹文章背景，不要分析正反兩面，直接發洩你的直覺反應。可以有語氣詞、不完整句子、PTT縮寫（ㄟ、ㄏㄏ、Xdd、幹、靠北、笑死等），不需要每句話都結構完整。禁止用條列或段落標題整理論點，禁止「首先」「再來」「最後」這類結構詞，禁止開頭打招呼語（如哈囉各位、大家好等）。'
+  const stance = [bot.stance, bot.tone, antiAiRules].filter(Boolean).join('\n')
   const proxyUrl = bot.proxy_host
     ? `http://${bot.proxy_user}:${bot.proxy_pass}@${bot.proxy_host}:${bot.proxy_port}`
     : null
