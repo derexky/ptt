@@ -38,8 +38,10 @@ async function refresh() {
 
   const conn = await mysql.createConnection(config.mysql)
   try {
+    const hosts = proxies.map(p => p.proxy_address)
     let updated = 0
     let inserted = 0
+
     for (let i = 0; i < proxies.length; i++) {
       const p = proxies[i]
       const host = p.proxy_address
@@ -49,29 +51,43 @@ async function refresh() {
       const label = `webshare_${i + 1}`
 
       const [rows] = await conn.execute(
-        'SELECT id FROM proxies WHERE label = ?', [label]
+        'SELECT id FROM proxies WHERE host = ?', [host]
       )
       if (rows.length > 0) {
         await conn.execute(
-          'UPDATE proxies SET host=?, port=?, username=?, password=? WHERE label=?',
-          [host, port, username, password, label]
+          'UPDATE proxies SET port=?, username=?, password=?, is_active=TRUE WHERE host=?',
+          [port, username, password, host]
         )
         updated++
       } else {
         await conn.execute(
-          'INSERT INTO proxies (host, port, username, password, label) VALUES (?,?,?,?,?)',
+          'INSERT INTO proxies (host, port, username, password, label, is_active) VALUES (?,?,?,?,?,TRUE)',
           [host, port, username, password, label]
         )
         inserted++
       }
     }
 
-    const [rows] = await conn.execute('SELECT id, host, port, label FROM proxies ORDER BY id')
-    console.log(`\n✅ 更新 ${updated} 筆，新增 ${inserted} 筆`)
+    // 停用不在 API 清單中的 webshare proxy
+    let deactivated = 0
+    if (hosts.length > 0) {
+      const placeholders = hosts.map(() => '?').join(',')
+      const [result] = await conn.execute(
+        `UPDATE proxies SET is_active=FALSE WHERE label LIKE 'webshare_%' AND host NOT IN (${placeholders})`,
+        hosts
+      )
+      deactivated = result.affectedRows
+    }
+
+    const [rows] = await conn.execute('SELECT id, host, port, label, is_active FROM proxies ORDER BY id')
+    console.log(`\n✅ 更新 ${updated} 筆，新增 ${inserted} 筆，停用 ${deactivated} 筆`)
     console.table(rows)
   } finally {
     await conn.end()
   }
 }
 
-refresh().catch(err => { console.error('❌', err.message); process.exit(1) })
+module.exports = { refresh }
+if (require.main === module) {
+  refresh().catch(err => { console.error('❌', err.message); process.exit(1) })
+}

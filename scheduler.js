@@ -2,6 +2,7 @@
 require('dotenv').config()
 const schedule = require('node-schedule')
 const { runWorkflow, runCrawl, runScheduledPosts, initSchema, createPool } = require('./workflow')
+const { refresh: refreshProxies } = require('./refreshProxies')
 
 const crawlCron = process.env.CRAWL_SCHEDULE || '*/30 * * * *'
 const cronExpr  = process.env.CRON_SCHEDULE  || '10,40 * * * *'
@@ -60,6 +61,22 @@ schedule.scheduleJob('* * * * *', async () => {
     scheduledPosting = false
   }
 })
+
+// 每週日 00:00 (Asia/Taipei) = 週六 16:00 UTC 更新 proxy
+const proxyCron = process.env.PROXY_REFRESH_SCHEDULE || '0 16 * * 6'
+if (process.env.WEBSHARE_API_KEY) {
+  schedule.scheduleJob(proxyCron, async () => {
+    console.log(`[${new Date().toISOString()}] Weekly proxy refresh starting...`)
+    try {
+      await refreshProxies()
+    } catch (err) {
+      console.error(`[ProxyRefresh] Error:`, err.message)
+    }
+  })
+  console.log(`  Proxy cron: "${proxyCron}"`)
+} else {
+  console.log(`  Proxy cron: skipped (WEBSHARE_API_KEY not set)`)
+}
 
 if (!botJob || !crawlJob) {
   console.error('Invalid cron expression in CRON_SCHEDULE or CRAWL_SCHEDULE.')
