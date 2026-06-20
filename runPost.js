@@ -49,6 +49,7 @@ if (!args.board) {
 }
 
 const isNeedBackup = process.env.NODE_ENV === 'develop'
+const isDryRun = !!args['dry-run']
 
 const isNewPost = !!args.subject
 
@@ -107,6 +108,7 @@ async function runPost() {
         isSendByWord,
         draft,
         isNeedBackup,
+        dryRun: isDryRun,
         proxyUrl,
       })
       .catch((err) => {

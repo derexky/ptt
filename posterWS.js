@@ -68,7 +68,7 @@ const keywordMap = {
   input_right: '\x1b[C', // 向右鍵
   input_search: 's',
   input_post: '\x10', // Ctrl + P
-  input_resp: 'y\r\n',
+  input_resp: 'y',
   input_1: '1\r\n',
 }
 // --- 狀態與關鍵字定義結束 ---
@@ -766,6 +766,10 @@ class Poster {
           // reTitle 未出現（直接進入引文確認），直接處理
         } else {
           console.log(`\n[Auto] respPost: unexpected chunk — "${chunk.replace(/\x1b\[[^A-Za-z]*[A-Za-z]/g, '').slice(0, 80)}"`)
+          // 版規畫面（文章發表綱領）或回應路由對話框（▲ 回應至）需要 Enter 繼續
+          if (chunk.includes('文章發表綱領') || chunk.includes('回應至')) {
+            this.send(keywordMap.input_enter)
+          }
         }
         if (chunk.includes(keywordMap.reContent)) {
           this.currentState = status.startPost
@@ -788,6 +792,12 @@ class Poster {
 
       case status.startPost:
         console.log('\n[Auto] Start post...')
+        if (this.dryRun) {
+          console.log('\n[Auto] DRY RUN: reply editor opened, aborting without posting')
+          this.stream.close()
+          this.finalResolve({ success: false, dryRun: true })
+          break
+        }
         if (this.postContent.length) {
           this.postContent = this.insertNewlinesPreservingExisting(
             this.postContent
@@ -867,6 +877,7 @@ class Poster {
       category,
       isSendByWord,
       isNeedBackup,
+      dryRun,
       onProgress,
       onPostDone,
       jobRef,
@@ -908,6 +919,7 @@ class Poster {
 
     this.isSendByWord = !!isSendByWord
     this.isNeedBackup = !!isNeedBackup
+    this.dryRun = !!dryRun
 
     return new Promise((resolve, reject) => {
       this._postReject = reject
