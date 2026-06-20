@@ -30,6 +30,7 @@ jobs:
             --network ptt-net \
             --restart unless-stopped \
             --env-file /share/CACHEDEV1_DATA/ptt-scheduler.env \
+            -e WEBSHARE_API_KEY=${{ secrets.WEBSHARE_API_KEY }} \
             ptt-scheduler:latest
 
           echo "=== Prune images ==="
