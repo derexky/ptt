@@ -762,6 +762,10 @@ class Poster {
         if (chunk.includes(keywordMap.reTitle)) {
           console.log(`\n[Auto] Run response process...`)
           this.send(keywordMap.input_Yes) // 採用原標題
+        } else if (chunk.includes(keywordMap.reContent)) {
+          // reTitle 未出現（直接進入引文確認），直接處理
+        } else {
+          console.log(`\n[Auto] respPost: unexpected chunk — "${chunk.replace(/\x1b\[[^A-Za-z]*[A-Za-z]/g, '').slice(0, 80)}"`)
         }
         if (chunk.includes(keywordMap.reContent)) {
           this.currentState = status.startPost

@@ -360,6 +360,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
     setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
   )
   const CONTENT_TIMEOUT_MS = 100_000       // 100s：登入 + AI 生成
+  const POST_PHASE_TIMEOUT_MS = 5 * 60_000 // 5min：resume 後發文完成
 
   // Starts postArticle (triggers AI) and waits for content to be ready.
   // Runs inside aiRateLimiter so the AI call is serialised; postPromise continues after.
@@ -394,7 +395,10 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       }
     }
     poster.continueState()
-    await postPromise
+    await Promise.race([
+      postPromise,
+      makeTimeout(POST_PHASE_TIMEOUT_MS, 'posting phase timed out after resume'),
+    ]).catch(err => { poster.abort(); throw err })
     return { ok: true, aiContent }
   } catch (err) {
     console.error(`[Bot ${bot.ptt_id}] Post failed:`, err.message)
@@ -489,7 +493,10 @@ async function runScheduledPosts() {
           makeTimeout(100_000, 'content not ready within 100s'),
         ])
         poster.continueState()
-        await postPromise
+        await Promise.race([
+          postPromise,
+          makeTimeout(5 * 60_000, 'posting phase timed out after resume'),
+        ]).catch(err => { poster.abort(); throw err })
 
         await pool.execute(
           `UPDATE scheduled_posts SET status = 'done', posted_at = UTC_TIMESTAMP() WHERE id = ?`,
