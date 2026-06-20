@@ -359,8 +359,8 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
   const makeTimeout = (ms, label) => new Promise((_, reject) =>
     setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
   )
-  const CONTENT_TIMEOUT_MS = 100_000       // 100s：登入 + AI 生成
-  const POST_PHASE_TIMEOUT_MS = 5 * 60_000 // 5min：resume 後發文完成
+  const CONTENT_TIMEOUT_MS = 100_000        // 100s：登入 + AI 生成
+  const POST_PHASE_TIMEOUT_MS = 20 * 60_000 // 20min：900字 × 1s/字 ≈ 15min 加緩衝
 
   // Starts postArticle (triggers AI) and waits for content to be ready.
   // Runs inside aiRateLimiter so the AI call is serialised; postPromise continues after.
@@ -495,7 +495,7 @@ async function runScheduledPosts() {
         poster.continueState()
         await Promise.race([
           postPromise,
-          makeTimeout(5 * 60_000, 'posting phase timed out after resume'),
+          makeTimeout(20 * 60_000, 'posting phase timed out after resume'),
         ]).catch(err => { poster.abort(); throw err })
 
         await pool.execute(
