@@ -85,7 +85,7 @@ async function runPost(config, progressCtx = {}) {
 }
 
 const config =  {
-  timeoutSeconds: 300,
+  timeoutSeconds: 120,
 }
 
 const createStreamHandler = async (request, response) => {
