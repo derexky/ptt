@@ -168,6 +168,7 @@ class Poster {
     this._jobFailed = true
     if (this.stream) this.stream.close()
     const message = err?.message || String(err)
+    const errObj = err instanceof Error ? err : new Error(message)
     try {
       await this.emitProgress(
         { status: 'failed', phase: 'failed', error: message },
@@ -176,9 +177,15 @@ class Poster {
     } catch (e) {
       console.error('[Poster] failJob emitProgress:', e.message)
     }
+    if (this._contentReadyReject) {
+      try {
+        this._contentReadyReject(errObj)
+        this._contentReadyReject = null
+      } catch (_) {}
+    }
     if (this._postReject) {
       try {
-        this._postReject(err instanceof Error ? err : new Error(message))
+        this._postReject(errObj)
       } catch (_) {}
     }
   }
