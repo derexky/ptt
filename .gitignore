@@ -4,6 +4,7 @@ hosting_secrets.json
 public/firebase-config.js
 
 external/
+!functions/external/
 # Logs
 logs
 *.log
