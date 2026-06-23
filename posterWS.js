@@ -442,21 +442,18 @@ class Poster {
   handleResolve = ({ text, link }) => {
     this.currentState = status.pause
 
-    if (!text || !text.length) {
+    if (!text?.trim().length) {
+      const err = new Error('Content is empty.')
       this.reportProgress(
-        {
-          status: 'failed',
-          phase: 'failed',
-          error: 'Content is empty.',
-        },
+        { status: 'failed', phase: 'failed', error: err.message },
         { immediate: true }
       )
       this.stream.close()
       this.isProcessing = false
-      this.finalResolve({
-        success: false,
-        message: 'Content is empty.',
-      })
+      if (this._contentReadyReject) {
+        this._contentReadyReject(err)
+        this._contentReadyReject = null
+      }
       return
     }
 
@@ -805,27 +802,30 @@ class Poster {
           this.finalResolve({ success: false, dryRun: true })
           break
         }
-        if (this.postContent.length) {
-          this.postContent = this.insertNewlinesPreservingExisting(
-            this.postContent
-          )
-
-          this.currentState = status.posting
-          this.reportProgress(
-            { status: 'posting', phase: 'posting', percent: 0, message: 'Started sending body' },
-            { immediate: true }
-          )
-          if (this.isSendByWord) {
-            void this.postEachWord().catch((e) => void this.failJob(e))
+        {
+          const processedContent = this.insertNewlinesPreservingExisting(this.postContent).trim()
+          if (processedContent.length) {
+            this.postContent = this.insertNewlinesPreservingExisting(this.postContent)
+            this.currentState = status.posting
+            this.reportProgress(
+              { status: 'posting', phase: 'posting', percent: 0, message: 'Started sending body' },
+              { immediate: true }
+            )
+            if (this.isSendByWord) {
+              void this.postEachWord().catch((e) => void this.failJob(e))
+            } else {
+              void this.postEachLine().catch((e) => void this.failJob(e))
+            }
           } else {
-            void this.postEachLine().catch((e) => void this.failJob(e))
+            console.log('\n[Auto] Content is empty, aborting post.')
+            this.currentState = status.end
+            this.isProcessing = false
+            void this.delayWrite('\x18')
+              .then(() => this.delayWrite('Q\r\n'))
+              .catch((e) => console.error('[Poster] abort editor error:', e.message))
           }
-        } else {
-          console.log('\n[Auto] Content is empty, skipping post.')
-          this.currentState = status.postDone
-          this.send(keywordMap.input_enter)
+          break
         }
-        break
 
       case status.postDone:
         console.log('\n[Auto] Post done.')
