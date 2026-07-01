@@ -377,7 +377,7 @@ async function replyWithBot(bot, article, { preGeneratedContent, onContentReady,
       preGeneratedContent: preGeneratedContent || null,
       onPostDone,
     }).catch(err => { console.error(`[Poster ${bot.ptt_id}] Background error:`, err.message); return null })
-    const result = await Promise.race([poster.contentReady, makeTimeout(CONTENT_TIMEOUT_MS, 'content not ready within 100s')])
+    const result = await Promise.race([poster.contentReady, makeTimeout(CONTENT_TIMEOUT_MS, 'content not ready within 100s').catch(err => { poster.abort(); throw err })])
     return { postPromise, result }
   }
 
@@ -492,7 +492,7 @@ async function runScheduledPosts() {
         await Promise.race([
           poster.contentReady,
           postPromise,
-          makeTimeout(100_000, 'content not ready within 100s'),
+          makeTimeout(100_000, 'content not ready within 100s').catch(err => { poster.abort(); throw err }),
         ])
         poster.continueState()
         await Promise.race([

@@ -36,7 +36,7 @@ const MIN_INTERVAL = 10000
 
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-async function generateContentByGoogle({ prompt, stance, target, isTroll = true, maxTokens = 800, maxRetries = 5, retryDelay = 30000 }) {
+async function generateContentByGoogle({ prompt, stance, target, isTroll = true, maxTokens = 800, maxRetries = 5, retryDelay = 30000, isCancelled }) {
   let viewpoint = stance || `你是一位資深鄉民，回文中會帶著低俗詼諧且有點嘲諷的語氣`
   if(target) viewpoint += `以${isTroll ? '諷刺' : '讚揚'}${target}的客觀態度來回應問題`
   const now = Date.now()
@@ -57,6 +57,7 @@ async function generateContentByGoogle({ prompt, stance, target, isTroll = true,
   const contents = [{ role: "user", parts: [{ text: prompt }] }]
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (isCancelled?.()) return { success: false, message: 'Cancelled' }
     try {
       const result = await model.generateContent({ contents, generationConfig: { maxOutputTokens: maxTokens } })
       lastCallTime = Date.now()
@@ -64,6 +65,7 @@ async function generateContentByGoogle({ prompt, stance, target, isTroll = true,
     } catch (error) {
       console.error(`\n[AI Error] 呼叫 Google Generative AI 失敗 (第 ${attempt + 1} 次):`, error.message)
       if (isDev && attempt < maxRetries) {
+        if (isCancelled?.()) return { success: false, message: 'Cancelled' }
         console.warn(`[AI Retry] ${retryDelay / 1000} 秒後重試...`)
         await new Promise(resolve => setTimeout(resolve, retryDelay))
       } else {

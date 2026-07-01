@@ -504,6 +504,7 @@ class Poster {
         prompt,
         stance: this.stance,
         target: this.target,
+        isCancelled: () => this.abortSignal,
       })
       if (aiContent.success) {
         rawText = aiContent.value
