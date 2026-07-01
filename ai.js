@@ -51,7 +51,7 @@ async function generateContentByGoogle({ prompt, stance, target, isTroll = true,
   }
 
   const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash-lite',
+    model: 'gemini-2.5-flash',
     systemInstruction: viewpoint,
   })
   const contents = [{ role: "user", parts: [{ text: prompt }] }]
