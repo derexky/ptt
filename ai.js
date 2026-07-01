@@ -36,7 +36,7 @@ const MIN_INTERVAL = 10000
 
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
-async function generateContentByGoogle({ prompt, stance, target, isTroll = true, maxTokens = 800, maxRetries = 5, retryDelay = 60000 }) {
+async function generateContentByGoogle({ prompt, stance, target, isTroll = true, maxTokens = 800, maxRetries = 5, retryDelay = 30000 }) {
   let viewpoint = stance || `你是一位資深鄉民，回文中會帶著低俗詼諧且有點嘲諷的語氣`
   if(target) viewpoint += `以${isTroll ? '諷刺' : '讚揚'}${target}的客觀態度來回應問題`
   const now = Date.now()
